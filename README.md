@@ -129,6 +129,12 @@ The installer is written to `installer_output\HearsaySetup.exe`.
 - **pystray + Pillow** -- System tray
 - **PyInstaller + Inno Setup** -- Build and install
 
+## Contact
+
+Robert Parks
+raparks@icloud.com
++1 213 451 3434
+
 ## License
 
-MIT
+MIT -- free to use, modify, and distribute for any purpose (personal or commercial). See [LICENSE](LICENSE) for full text.
