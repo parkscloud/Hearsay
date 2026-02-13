@@ -24,7 +24,7 @@ No API calls, no cloud services -- everything runs on your machine.
 
 ```bash
 # Clone the repo
-git clone https://github.com/your-org/hearsay.git
+git clone https://github.com/parkscloud/Hearsay.git
 cd hearsay
 
 # Install dependencies
@@ -44,7 +44,7 @@ After setup, Hearsay lives in your system tray. Right-click the icon to start re
 
 ### Installed version
 
-Download the latest installer from the [Releases](https://github.com/your-org/hearsay/releases) page and run `HearsaySetup.exe`. The app appears in your Start Menu and Add/Remove Programs.
+Download the latest installer from the [Releases](https://github.com/parkscloud/Hearsay/releases) page and run `HearsaySetup.exe`. The app appears in your Start Menu and Add/Remove Programs.
 
 ## Usage
 
