@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import queue
+import string
 import time
 
 from hearsay.transcription.engine import TranscriptionEngine, TranscriptionResult
@@ -67,6 +68,11 @@ class TranscriptionPipeline(StoppableThread):
 
         log.info("TranscriptionPipeline stopped")
 
+    @staticmethod
+    def _normalize(word: str) -> str:
+        """Strip leading/trailing punctuation for comparison."""
+        return word.strip(string.punctuation)
+
     def _deduplicate(self, result: TranscriptionResult) -> TranscriptionResult:
         """Remove overlapping prefix from *result* that duplicates the tail of the previous chunk."""
         new_words = result.text.split()
@@ -78,7 +84,7 @@ class TranscriptionPipeline(StoppableThread):
         for length in range(self._MIN_MATCH_WORDS, min(len(self._prev_tail_words), len(new_words)) + 1):
             suffix = self._prev_tail_words[-length:]
             prefix = new_words[:length]
-            if [w.lower() for w in suffix] == [w.lower() for w in prefix]:
+            if [self._normalize(w).lower() for w in suffix] == [self._normalize(w).lower() for w in prefix]:
                 best = length
 
         if best == 0:
