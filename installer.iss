@@ -24,8 +24,8 @@ UninstallDisplayIcon={app}\Hearsay.exe
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
-Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription: "Additional shortcuts:"
-Name: "startupicon"; Description: "Start Hearsay with Windows"; GroupDescription: "Startup:"; Flags: checked
+Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription: "Additional shortcuts:"; Flags: unchecked
+Name: "startupicon"; Description: "Start Hearsay with Windows"; GroupDescription: "Startup:"
 
 [Files]
 Source: "dist\Hearsay\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
