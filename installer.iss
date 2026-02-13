@@ -5,7 +5,7 @@
 AppName=Hearsay
 AppVersion=1.0.0
 AppPublisher=Hearsay
-AppPublisherURL=https://github.com/hearsay
+AppPublisherURL=https://github.com/parkscloud/Hearsay
 DefaultDirName={autopf}\Hearsay
 DefaultGroupName=Hearsay
 OutputDir=installer_output
