@@ -14,7 +14,8 @@ SetupIconFile=src\assets\icon.ico
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
-PrivilegesRequired=lowest
+PrivilegesRequired=admin
+CloseApplications=yes
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 UninstallDisplayIcon={app}\Hearsay.exe
@@ -24,7 +25,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription: "Additional shortcuts:"
-Name: "startupicon"; Description: "Start Hearsay with Windows"; GroupDescription: "Startup:"
+Name: "startupicon"; Description: "Start Hearsay with Windows"; GroupDescription: "Startup:"; Flags: checked
 
 [Files]
 Source: "dist\Hearsay\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -33,7 +34,7 @@ Source: "dist\Hearsay\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs 
 Name: "{group}\Hearsay"; Filename: "{app}\Hearsay.exe"
 Name: "{group}\Uninstall Hearsay"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\Hearsay"; Filename: "{app}\Hearsay.exe"; Tasks: desktopicon
-Name: "{userstartup}\Hearsay"; Filename: "{app}\Hearsay.exe"; Tasks: startupicon
+Name: "{commonstartup}\Hearsay"; Filename: "{app}\Hearsay.exe"; Tasks: startupicon
 
 [Run]
 Filename: "{app}\Hearsay.exe"; Description: "Launch Hearsay"; Flags: nowait postinstall skipifsilent

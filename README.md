@@ -46,6 +46,24 @@ After setup, Hearsay lives in your system tray. Right-click the icon to start re
 
 Download the latest installer from the [Releases](https://github.com/parkscloud/Hearsay/releases) page and run `HearsaySetup.exe`. The app appears in your Start Menu and Add/Remove Programs.
 
+### Silent install (RMM / SCCM / Intune)
+
+```
+HearsaySetup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
+```
+
+Installs to `C:\Program Files\Hearsay` for all users. Hearsay starts automatically at login. To skip auto-start:
+
+```
+HearsaySetup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /TASKS=""
+```
+
+Uninstall silently:
+
+```
+"C:\Program Files\Hearsay\unins000.exe" /VERYSILENT
+```
+
 ## Usage
 
 1. **Right-click** the tray icon
@@ -132,6 +150,7 @@ The installer is written to `installer_output\HearsaySetup.exe`.
 ## Contact
 
 Robert Parks
+[raparks.com](https://raparks.com/)
 raparks@icloud.com
 +1 213 451 3434
 
