@@ -22,6 +22,9 @@ class TranscriptionPipeline(StoppableThread):
         engine: Configured TranscriptionEngine (model already loaded).
     """
 
+    _TAIL_WORD_COUNT = 15  # words kept from previous chunk for overlap matching
+    _MIN_MATCH_WORDS = 2   # minimum overlap length to avoid false positives
+
     def __init__(
         self,
         audio_queue: queue.Queue,
@@ -32,6 +35,7 @@ class TranscriptionPipeline(StoppableThread):
         self.audio_queue = audio_queue
         self.transcript_queue = transcript_queue
         self.engine = engine
+        self._prev_tail_words: list[str] = []
 
     def run(self) -> None:
         log.info("TranscriptionPipeline started")
@@ -52,8 +56,69 @@ class TranscriptionPipeline(StoppableThread):
                     result.text[:80] if result.text else "(empty)",
                 )
                 if result.text:
-                    self.transcript_queue.put(result)
+                    original_words = result.text.split()
+                    if chunk_index > 0 and self._prev_tail_words:
+                        result = self._deduplicate(result)
+                    self._prev_tail_words = original_words[-self._TAIL_WORD_COUNT:]
+                    if result.text:
+                        self.transcript_queue.put(result)
             except Exception:
                 log.error("Transcription failed for chunk %d", chunk_index, exc_info=True)
 
         log.info("TranscriptionPipeline stopped")
+
+    def _deduplicate(self, result: TranscriptionResult) -> TranscriptionResult:
+        """Remove overlapping prefix from *result* that duplicates the tail of the previous chunk."""
+        new_words = result.text.split()
+        if len(new_words) < self._MIN_MATCH_WORDS:
+            return result
+
+        # Find the longest prefix of new_words that matches a suffix of _prev_tail_words.
+        best = 0
+        for length in range(self._MIN_MATCH_WORDS, min(len(self._prev_tail_words), len(new_words)) + 1):
+            suffix = self._prev_tail_words[-length:]
+            prefix = new_words[:length]
+            if [w.lower() for w in suffix] == [w.lower() for w in prefix]:
+                best = length
+
+        if best == 0:
+            return result
+
+        stripped_words = new_words[best:]
+        log.info(
+            "Chunk %d: stripped %d overlapping words: %s",
+            result.chunk_index,
+            best,
+            " ".join(new_words[:best]),
+        )
+
+        if not stripped_words:
+            return TranscriptionResult(
+                text="",
+                segments=[],
+                language=result.language,
+                language_probability=result.language_probability,
+                chunk_index=result.chunk_index,
+            )
+
+        # Rebuild text and trim leading segments that were fully covered by the overlap.
+        new_text = " ".join(stripped_words)
+        chars_removed = len(" ".join(new_words[:best])) + 1  # +1 for the space after
+        trimmed_segments = []
+        for seg in result.segments:
+            seg_text = seg["text"]
+            if chars_removed >= len(seg_text):
+                chars_removed -= len(seg_text) + 1  # +1 for joining space
+                continue
+            if chars_removed > 0:
+                seg = {**seg, "text": seg_text[chars_removed:].lstrip()}
+                chars_removed = 0
+            trimmed_segments.append(seg)
+
+        return TranscriptionResult(
+            text=new_text,
+            segments=trimmed_segments if trimmed_segments else result.segments,
+            language=result.language,
+            language_probability=result.language_probability,
+            chunk_index=result.chunk_index,
+        )
