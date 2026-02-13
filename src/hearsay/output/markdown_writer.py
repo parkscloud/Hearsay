@@ -6,8 +6,7 @@ import logging
 from datetime import datetime
 from pathlib import Path
 
-from hearsay.constants import CHUNK_DURATION_S
-from hearsay.output.formatter import format_timestamp, make_title
+from hearsay.output.formatter import make_title
 from hearsay.transcription.engine import TranscriptionResult
 
 log = logging.getLogger(__name__)
@@ -37,18 +36,8 @@ class MarkdownWriter:
         if not self._header_written:
             self._write_header()
 
-        # Calculate the wall-clock offset for this chunk
-        chunk_offset = result.chunk_index * CHUNK_DURATION_S
-
         with open(self.file_path, "a", encoding="utf-8") as f:
-            if result.segments:
-                for seg in result.segments:
-                    abs_start = chunk_offset + seg["start"]
-                    ts = format_timestamp(abs_start)
-                    f.write(f"**[{ts}]** {seg['text']}\n\n")
-            else:
-                ts = format_timestamp(chunk_offset)
-                f.write(f"**[{ts}]** {result.text}\n\n")
+            f.write(f"{result.text}\n\n")
 
         log.debug("Appended chunk %d to %s", result.chunk_index, self.file_path)
 
