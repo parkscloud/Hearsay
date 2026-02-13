@@ -1,0 +1,10 @@
+.claude
+__pycache__/
+*.pyc
+*.pyo
+dist/
+build/
+*.spec
+installer_output/
+*.egg-info/
+.env
