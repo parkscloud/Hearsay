@@ -84,7 +84,13 @@ class TranscriptionPipeline(StoppableThread):
         for length in range(self._MIN_MATCH_WORDS, min(len(self._prev_tail_words), len(new_words)) + 1):
             suffix = self._prev_tail_words[-length:]
             prefix = new_words[:length]
-            if [self._normalize(w).lower() for w in suffix] == [self._normalize(w).lower() for w in prefix]:
+            tail = [self._normalize(w).lower() for w in suffix]
+            head = [self._normalize(w).lower() for w in prefix]
+            # All words after the first must match exactly; the first word of the
+            # new chunk may be truncated (e.g. "replaced" -> "placed") so allow a
+            # suffix-of-word match when the fragment is at least 3 characters.
+            first_ok = tail[0] == head[0] or (len(head[0]) >= 3 and tail[0].endswith(head[0]))
+            if first_ok and tail[1:] == head[1:]:
                 best = length
 
         if best == 0:
