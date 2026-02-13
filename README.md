@@ -151,8 +151,6 @@ The installer is written to `installer_output\HearsaySetup.exe`.
 
 Robert Parks
 [raparks.com](https://raparks.com/)
-raparks@icloud.com
-+1 213 451 3434
 
 ## License
 
