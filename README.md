@@ -100,21 +100,24 @@ src/hearsay/
 
 ## Building
 
-### PyInstaller (portable)
+### Prerequisites
+
+1. **Python 3.11+**
+2. **Project dependencies:** `pip install -r requirements.txt`
+3. **PyInstaller:** `pip install pyinstaller`
+4. **Inno Setup 6+:** `winget install JRSoftware.InnoSetup`
+
+### Build steps
 
 ```bash
+# 1. Bundle the app with PyInstaller (output in dist\Hearsay\)
 build.bat
+
+# 2. Compile the Windows installer
+iscc installer.iss
 ```
 
-Output in `dist\Hearsay\`.
-
-### Windows Installer
-
-1. Build with PyInstaller first
-2. Install [Inno Setup 6+](https://jrsoftware.org/isinfo.php)
-3. Compile `installer.iss`
-
-Output: `installer_output\HearsaySetup.exe`
+The installer is written to `installer_output\HearsaySetup.exe`.
 
 ## Tech Stack
 
