@@ -137,6 +137,10 @@ iscc installer.iss
 
 The installer is written to `installer_output\HearsaySetup.exe`.
 
+### Releasing
+
+See [RELEASING.md](RELEASING.md) for instructions on creating GitHub releases with the installer attached. This is a reference for the author and LLM when updating the application.
+
 ## Tech Stack
 
 - **Python 3.11+**
