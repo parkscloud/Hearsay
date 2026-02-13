@@ -192,6 +192,22 @@ class HearsayApp:
             self._engine.unload()
             self._engine = None
 
+        # Drain any remaining transcript results that arrived after polling stopped
+        if self._writer:
+            try:
+                while True:
+                    result = self._transcript_queue.get_nowait()
+                    self._writer.append(result)
+                    if self._live_view:
+                        for seg in result.segments:
+                            from hearsay.output.formatter import format_timestamp
+                            ts = format_timestamp(
+                                result.chunk_index * 30 + seg["start"]
+                            )
+                            self._live_view.append_text(f"[{ts}] {seg['text']}")
+            except queue.Empty:
+                pass
+
         # Finalize transcript
         duration = None
         if self._recording_start_time:
