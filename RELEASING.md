@@ -24,19 +24,19 @@ Output: `installer_output\HearsaySetup.exe`
 
 ```bash
 # Tag and create the release with the installer attached
-gh release create v1.0.0 installer_output/HearsaySetup.exe --title "Hearsay v1.0.0" --notes "Initial release."
+gh release create v1.0.1 installer_output/HearsaySetup.exe --title "Hearsay v1.0.1" --notes "Bug fixes and improvements."
 ```
 
 For subsequent releases, bump the version tag and update the notes:
 
 ```bash
-gh release create v1.1.0 installer_output/HearsaySetup.exe --title "Hearsay v1.1.0" --notes "Description of changes."
+gh release create vX.Y.Z installer_output/HearsaySetup.exe --title "Hearsay vX.Y.Z" --notes "Description of changes."
 ```
 
 To generate notes from commits since the last release:
 
 ```bash
-gh release create v1.1.0 installer_output/HearsaySetup.exe --title "Hearsay v1.1.0" --generate-notes
+gh release create vX.Y.Z installer_output/HearsaySetup.exe --title "Hearsay vX.Y.Z" --generate-notes
 ```
 
 ## Verify

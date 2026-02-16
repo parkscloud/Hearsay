@@ -32,9 +32,11 @@ def resample(
     elif audio.dtype != np.float32:
         audio = audio.astype(np.float32)
 
-    # Downmix to mono if stereo
+    # Downmix to mono if stereo, or flatten if single-channel 2D
     if orig_channels > 1:
         audio = audio.reshape(-1, orig_channels).mean(axis=1)
+    elif audio.ndim > 1:
+        audio = audio.ravel()
 
     # Resample if needed
     if orig_sr != SAMPLE_RATE:

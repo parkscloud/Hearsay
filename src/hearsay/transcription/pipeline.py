@@ -45,28 +45,42 @@ class TranscriptionPipeline(StoppableThread):
                 chunk_index, audio = self.audio_queue.get(timeout=1.0)
             except queue.Empty:
                 continue
+            self._process_chunk(chunk_index, audio)
 
+        # Drain any audio chunks still in the queue after stop signal.
+        # The recorder flushes its buffer before exiting, so these chunks
+        # must be transcribed to avoid losing the tail of the recording.
+        log.info("TranscriptionPipeline draining remaining audio chunks")
+        while True:
             try:
-                t0 = time.perf_counter()
-                result = self.engine.transcribe(audio, chunk_index=chunk_index)
-                elapsed = time.perf_counter() - t0
-                log.info(
-                    "Chunk %d transcribed in %.1fs: %s",
-                    chunk_index,
-                    elapsed,
-                    result.text[:80] if result.text else "(empty)",
-                )
-                if result.text:
-                    original_words = result.text.split()
-                    if chunk_index > 0 and self._prev_tail_words:
-                        result = self._deduplicate(result)
-                    self._prev_tail_words = original_words[-self._TAIL_WORD_COUNT:]
-                    if result.text:
-                        self.transcript_queue.put(result)
-            except Exception:
-                log.error("Transcription failed for chunk %d", chunk_index, exc_info=True)
+                chunk_index, audio = self.audio_queue.get_nowait()
+            except queue.Empty:
+                break
+            self._process_chunk(chunk_index, audio)
 
         log.info("TranscriptionPipeline stopped")
+
+    def _process_chunk(self, chunk_index: int, audio) -> None:
+        """Transcribe a single audio chunk and enqueue the result."""
+        try:
+            t0 = time.perf_counter()
+            result = self.engine.transcribe(audio, chunk_index=chunk_index)
+            elapsed = time.perf_counter() - t0
+            log.info(
+                "Chunk %d transcribed in %.1fs: %s",
+                chunk_index,
+                elapsed,
+                result.text[:80] if result.text else "(empty)",
+            )
+            if result.text:
+                original_words = result.text.split()
+                if chunk_index > 0 and self._prev_tail_words:
+                    result = self._deduplicate(result)
+                self._prev_tail_words = original_words[-self._TAIL_WORD_COUNT:]
+                if result.text:
+                    self.transcript_queue.put(result)
+        except Exception:
+            log.error("Transcription failed for chunk %d", chunk_index, exc_info=True)
 
     @staticmethod
     def _normalize(word: str) -> str:

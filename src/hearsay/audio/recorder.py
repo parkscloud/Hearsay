@@ -227,6 +227,19 @@ class AudioRecorder(StoppableThread):
                             loopback_buf.clear()
                         mic_buffer.clear()
 
+            # Flush remaining audio
+            if loopback_buf:
+                lb_chunk = np.concatenate(loopback_buf)
+                if len(lb_chunk) > SAMPLE_RATE:  # Only if > 1 second
+                    if mic_buffer:
+                        mic_chunk = np.concatenate(mic_buffer)[:len(lb_chunk)]
+                        if len(mic_chunk) < len(lb_chunk):
+                            mic_chunk = np.pad(mic_chunk, (0, len(lb_chunk) - len(mic_chunk)))
+                        mixed = mix_streams(lb_chunk, mic_chunk)
+                    else:
+                        mixed = lb_chunk
+                    self.audio_queue.put((chunk_index, mixed))
+
             loopback_stream.stop_stream()
             loopback_stream.close()
         finally:

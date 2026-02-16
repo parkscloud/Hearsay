@@ -175,19 +175,22 @@ class HearsayApp:
         log.info("Stopping recording")
         self._recording = False
 
-        # Stop recorder
+        # 1. Stop recorder first so it flushes remaining audio to the queue.
         if self._recorder:
             self._recorder.stop()
             self._recorder.join(timeout=5)
             self._recorder = None
 
-        # Stop pipeline
+        # 2. Stop pipeline -- it will drain any remaining audio chunks before
+        #    exiting.  Use a generous timeout so CPU transcription can finish.
         if self._pipeline:
             self._pipeline.stop()
-            self._pipeline.join(timeout=10)
+            self._pipeline.join(timeout=60)
+            if self._pipeline.is_alive():
+                log.warning("Pipeline thread still running after join timeout")
             self._pipeline = None
 
-        # Unload model
+        # 3. Unload model only after pipeline is done.
         if self._engine:
             self._engine.unload()
             self._engine = None
