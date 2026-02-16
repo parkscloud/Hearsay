@@ -153,8 +153,7 @@ See [RELEASING.md](RELEASING.md) for instructions on creating GitHub releases wi
 
 ## Contact
 
-Robert Parks
-
+Robert Parks<br>
 [raparks.com](https://raparks.com/)
 
 ## License
