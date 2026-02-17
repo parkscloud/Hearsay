@@ -107,6 +107,7 @@ src/hearsay/
 │   ├── tray.py              # System tray icon (pystray)
 │   ├── wizard.py            # First-run setup wizard
 │   ├── live_view.py         # Live transcript window
+│   ├── about_window.py      # About dialog
 │   ├── settings_window.py   # Settings editor
 │   ├── icons.py             # Programmatic icon generation
 │   └── theme.py             # customtkinter theme

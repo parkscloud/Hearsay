@@ -28,6 +28,15 @@ class LiveTranscriptWindow(ctk.CTkToplevel):
         # Hide on close rather than destroy
         self.protocol("WM_DELETE_WINDOW", self.hide)
 
+        # Delay disclaimer
+        ctk.CTkLabel(
+            self,
+            text="Transcript text appears with a delay of approximately 30\u201360 seconds depending on your hardware.",
+            font=("Segoe UI", 10, "italic"),
+            text_color="gray",
+            anchor="w",
+        ).pack(fill="x", padx=12, pady=(8, 0))
+
         # Transcript text area
         self._textbox = ctk.CTkTextbox(
             self,
@@ -90,6 +99,14 @@ class LiveTranscriptWindow(ctk.CTkToplevel):
         """Append text to the transcript view."""
         self._textbox.configure(state="normal")
         self._textbox.insert("end", text + "\n")
+        self._textbox.configure(state="disabled")
+        if self._autoscroll.get():
+            self._textbox.see("end")
+
+    def append_separator(self, timestamp: str) -> None:
+        """Insert a visual divider marking the end of a recording session."""
+        self._textbox.configure(state="normal")
+        self._textbox.insert("end", f"\n--- Recording ended at {timestamp} ---\n\n")
         self._textbox.configure(state="disabled")
         if self._autoscroll.get():
             self._textbox.see("end")

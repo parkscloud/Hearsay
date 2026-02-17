@@ -3,7 +3,7 @@
 
 [Setup]
 AppName=Hearsay
-AppVersion=1.0.1
+AppVersion=1.0.2
 AppPublisher=Hearsay
 AppPublisherURL=https://github.com/parkscloud/Hearsay
 DefaultDirName={autopf}\Hearsay
@@ -41,3 +41,13 @@ Filename: "{app}\Hearsay.exe"; Description: "Launch Hearsay"; Flags: nowait post
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{localappdata}\Hearsay"
+
+[Code]
+function InitializeUninstall(): Boolean;
+var
+  ResultCode: Integer;
+begin
+  Exec('taskkill', '/F /IM Hearsay.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Sleep(500);
+  Result := True;
+end;

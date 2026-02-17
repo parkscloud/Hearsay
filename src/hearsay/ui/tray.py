@@ -38,6 +38,7 @@ class SystemTrayIcon:
         on_show_live_view: Callable[[], None],
         on_open_settings: Callable[[], None],
         on_open_output_dir: Callable[[], None],
+        on_open_about: Callable[[], None],
         on_quit: Callable[[], None],
     ) -> None:
         self._on_start_recording = on_start_recording
@@ -45,6 +46,7 @@ class SystemTrayIcon:
         self._on_show_live_view = on_show_live_view
         self._on_open_settings = on_open_settings
         self._on_open_output_dir = on_open_output_dir
+        self._on_open_about = on_open_about
         self._on_quit = on_quit
         self._recording = False
         self._icon: pystray.Icon | None = None
@@ -58,6 +60,7 @@ class SystemTrayIcon:
                 Item("Open Transcripts Folder", lambda: self._on_open_output_dir()),
                 pystray.Menu.SEPARATOR,
                 Item("Settings", lambda: self._on_open_settings()),
+                Item("About", lambda: self._on_open_about()),
                 Item("Quit", lambda: self._on_quit()),
             )
         return pystray.Menu(
@@ -74,6 +77,7 @@ class SystemTrayIcon:
             Item("Open Transcripts Folder", lambda: self._on_open_output_dir()),
             pystray.Menu.SEPARATOR,
             Item("Settings", lambda: self._on_open_settings()),
+            Item("About", lambda: self._on_open_about()),
             Item("Quit", lambda: self._on_quit()),
         )
 

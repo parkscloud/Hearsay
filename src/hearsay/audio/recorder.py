@@ -149,12 +149,20 @@ class AudioRecorder(StoppableThread):
                 self.audio_queue.put((chunk_index, chunk))
 
     def _record_both(self) -> None:
-        """Record both loopback and mic, mix them."""
+        """Record both loopback and mic, mix them.
+
+        Both streams are opened through the same PyAudioWPatch (PortAudio)
+        instance to avoid the COM/PortAudio initialisation conflict that
+        occurs when PyAudioWPatch and sounddevice run on the same thread.
+        The mic stream uses PyAudio's callback mode so it accumulates data
+        asynchronously while the main loop drives off blocking loopback
+        reads.
+        """
         import pyaudiowpatch as pyaudio
-        import sounddevice as sd
 
         p = pyaudio.PyAudio()
         try:
+            # --- Loopback setup ---
             if self.loopback_device_index is None:
                 from hearsay.audio.devices import get_default_loopback
                 dev = get_default_loopback()
@@ -175,59 +183,96 @@ class AudioRecorder(StoppableThread):
                 frames_per_buffer=frames_per_buffer,
             )
 
-            mic_buffer: list[np.ndarray] = []
+            # --- Mic setup via same PyAudio instance ---
+            wasapi_info = p.get_host_api_info_by_type(pyaudio.paWASAPI)
+            mic_dev_index = wasapi_info.get("defaultInputDevice", -1)
+            if mic_dev_index < 0:
+                log.error("No default WASAPI input device — recording loopback only")
+                self._chunk_loop(
+                    read_fn=lambda: loopback_stream.read(
+                        frames_per_buffer, exception_on_overflow=False,
+                    ),
+                    sr=self.loopback_rate,
+                    channels=self.loopback_channels,
+                )
+                loopback_stream.stop_stream()
+                loopback_stream.close()
+                return
 
-            def mic_callback(indata: np.ndarray, frames: int, time_info: object, status: object) -> None:
-                mono = resample(indata.copy(), self.mic_rate, self.mic_channels)
-                mic_buffer.append(mono)
-
-            mic_stream = sd.InputStream(
-                device=self.mic_device_index,
-                samplerate=self.mic_rate,
-                channels=self.mic_channels,
-                dtype="float32",
-                callback=mic_callback,
+            mic_dev = p.get_device_info_by_index(mic_dev_index)
+            mic_channels = max(1, mic_dev["maxInputChannels"])
+            mic_rate = int(mic_dev["defaultSampleRate"])
+            log.info(
+                "Mic device for 'Both': %s (index=%d, ch=%d, rate=%d)",
+                mic_dev["name"], mic_dev_index, mic_channels, mic_rate,
             )
 
+            mic_buffer: list[np.ndarray] = []
+
+            def mic_callback(in_data, frame_count, time_info, status_flags):
+                try:
+                    audio = np.frombuffer(in_data, dtype=np.int16)
+                    mono = resample(audio, mic_rate, mic_channels)
+                    mic_buffer.append(mono)
+                except Exception:
+                    log.error("Error in mic callback", exc_info=True)
+                return (None, pyaudio.paContinue)
+
+            mic_stream = p.open(
+                format=pyaudio.paInt16,
+                channels=mic_channels,
+                rate=mic_rate,
+                input=True,
+                input_device_index=mic_dev_index,
+                frames_per_buffer=frames_per_buffer,
+                stream_callback=mic_callback,
+            )
+            mic_stream.start_stream()
+
+            # --- Main loop (driven by blocking loopback reads) ---
             chunk_samples = int(CHUNK_DURATION_S * SAMPLE_RATE)
             overlap_samples = int(OVERLAP_DURATION_S * SAMPLE_RATE)
             loopback_buf: list[np.ndarray] = []
             chunk_index = 0
 
-            with mic_stream:
-                while not self.stopped():
-                    try:
-                        raw = loopback_stream.read(frames_per_buffer, exception_on_overflow=False)
-                    except Exception:
-                        break
-                    audio = np.frombuffer(raw, dtype=np.int16)
-                    mono = resample(audio, self.loopback_rate, self.loopback_channels)
-                    loopback_buf.append(mono)
+            while not self.stopped():
+                try:
+                    raw = loopback_stream.read(frames_per_buffer, exception_on_overflow=False)
+                except Exception:
+                    break
+                audio = np.frombuffer(raw, dtype=np.int16)
+                mono = resample(audio, self.loopback_rate, self.loopback_channels)
+                loopback_buf.append(mono)
 
-                    total = sum(len(b) for b in loopback_buf)
-                    if total >= chunk_samples:
-                        lb_chunk = np.concatenate(loopback_buf)[:chunk_samples]
+                total = sum(len(b) for b in loopback_buf)
+                if total >= chunk_samples:
+                    lb_chunk = np.concatenate(loopback_buf)[:chunk_samples]
+                    mic_samples = sum(len(b) for b in mic_buffer)
+                    log.debug(
+                        "Mixing chunk %d: loopback=%d mic=%d samples",
+                        chunk_index, len(lb_chunk), mic_samples,
+                    )
 
-                        if mic_buffer:
-                            mic_chunk = np.concatenate(mic_buffer)[:chunk_samples]
-                            if len(mic_chunk) < chunk_samples:
-                                mic_chunk = np.pad(mic_chunk, (0, chunk_samples - len(mic_chunk)))
-                            mixed = mix_streams(lb_chunk, mic_chunk)
-                        else:
-                            mixed = lb_chunk
+                    if mic_buffer:
+                        mic_chunk = np.concatenate(mic_buffer)[:chunk_samples]
+                        if len(mic_chunk) < chunk_samples:
+                            mic_chunk = np.pad(mic_chunk, (0, chunk_samples - len(mic_chunk)))
+                        mixed = mix_streams(lb_chunk, mic_chunk)
+                    else:
+                        mixed = lb_chunk
 
-                        self.audio_queue.put((chunk_index, mixed))
-                        chunk_index += 1
+                    self.audio_queue.put((chunk_index, mixed))
+                    chunk_index += 1
 
-                        if overlap_samples > 0:
-                            leftover = np.concatenate(loopback_buf)[chunk_samples - overlap_samples:]
-                            loopback_buf.clear()
-                            loopback_buf.append(leftover)
-                        else:
-                            loopback_buf.clear()
-                        mic_buffer.clear()
+                    if overlap_samples > 0:
+                        leftover = np.concatenate(loopback_buf)[chunk_samples - overlap_samples:]
+                        loopback_buf.clear()
+                        loopback_buf.append(leftover)
+                    else:
+                        loopback_buf.clear()
+                    mic_buffer.clear()
 
-            # Flush remaining audio
+            # --- Flush remaining audio ---
             if loopback_buf:
                 lb_chunk = np.concatenate(loopback_buf)
                 if len(lb_chunk) > SAMPLE_RATE:  # Only if > 1 second
@@ -240,6 +285,8 @@ class AudioRecorder(StoppableThread):
                         mixed = lb_chunk
                     self.audio_queue.put((chunk_index, mixed))
 
+            mic_stream.stop_stream()
+            mic_stream.close()
             loopback_stream.stop_stream()
             loopback_stream.close()
         finally:

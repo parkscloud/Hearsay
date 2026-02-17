@@ -25,4 +25,3 @@ if %ERRORLEVEL% EQU 0 (
 ) else (
     echo Build FAILED.
 )
-pause

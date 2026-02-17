@@ -17,6 +17,7 @@ from hearsay.constants import APP_NAME, LIVE_VIEW_POLL_MS
 from hearsay.output.markdown_writer import MarkdownWriter
 from hearsay.transcription.engine import TranscriptionEngine
 from hearsay.transcription.pipeline import TranscriptionPipeline
+from hearsay.ui.about_window import AboutWindow
 from hearsay.ui.live_view import LiveTranscriptWindow
 from hearsay.ui.settings_window import SettingsWindow
 from hearsay.ui.theme import apply_theme
@@ -48,6 +49,7 @@ class HearsayApp:
         # State
         self._recording = False
         self._recording_start_time: float | None = None
+        self._teardown_thread: threading.Thread | None = None
 
         # UI
         apply_theme()
@@ -68,6 +70,7 @@ class HearsayApp:
             on_show_live_view=self._toggle_live_view,
             on_open_settings=self._open_settings,
             on_open_output_dir=self._open_output_dir,
+            on_open_about=self._open_about,
             on_quit=self._quit,
         )
         tray_thread = threading.Thread(target=self._tray.run, daemon=True, name="TrayIcon")
@@ -105,18 +108,6 @@ class HearsayApp:
         self._recording = True
         self._recording_start_time = time.time()
 
-        # Clear queues
-        while not self._audio_queue.empty():
-            try:
-                self._audio_queue.get_nowait()
-            except queue.Empty:
-                break
-        while not self._transcript_queue.empty():
-            try:
-                self._transcript_queue.get_nowait()
-            except queue.Empty:
-                break
-
         # Set up markdown writer
         self._writer = MarkdownWriter(self._config.output_dir)
 
@@ -130,6 +121,23 @@ class HearsayApp:
         )
 
         def load_and_start() -> None:
+            # Wait for any pending teardown to complete first
+            if self._teardown_thread is not None:
+                self._teardown_thread.join(timeout=30)
+                self._teardown_thread = None
+
+            # Now safe to clear queues (old teardown has finished draining them)
+            while not self._audio_queue.empty():
+                try:
+                    self._audio_queue.get_nowait()
+                except queue.Empty:
+                    break
+            while not self._transcript_queue.empty():
+                try:
+                    self._transcript_queue.get_nowait()
+                except queue.Empty:
+                    break
+
             self._engine.load()
 
             # Start pipeline
@@ -168,63 +176,108 @@ class HearsayApp:
         self._poll_transcripts()
 
     def _stop_recording(self) -> None:
-        """Stop the current recording session."""
+        """Stop the current recording session.
+
+        Updates the tray and UI immediately, then runs the blocking
+        teardown (join threads, unload model, finalize file) on a
+        background thread so the pystray event loop stays responsive.
+        """
         if not self._recording:
             return
 
         log.info("Stopping recording")
         self._recording = False
 
+        # Update tray immediately so the menu is responsive
+        if self._tray:
+            self._tray.set_recording(False)
+
+        # Update live view status immediately
+        safe_after(self._root, 0, lambda: (
+            self._live_view.set_status("Saving...") if self._live_view else None
+        ))
+
+        # Capture references for the background thread
+        recorder = self._recorder
+        pipeline = self._pipeline
+        engine = self._engine
+        writer = self._writer
+        start_time = self._recording_start_time
+
+        self._recorder = None
+        self._pipeline = None
+        self._engine = None
+        self._writer = None
+        self._recording_start_time = None
+
+        self._teardown_thread = threading.Thread(
+            target=self._teardown_recording,
+            args=(recorder, pipeline, engine, writer, start_time),
+            daemon=True,
+            name="RecordingTeardown",
+        )
+        self._teardown_thread.start()
+
+    def _teardown_recording(
+        self,
+        recorder: AudioRecorder | None,
+        pipeline: TranscriptionPipeline | None,
+        engine: TranscriptionEngine | None,
+        writer: MarkdownWriter | None,
+        start_time: float | None,
+    ) -> None:
+        """Blocking recording teardown — runs on a background thread."""
         # 1. Stop recorder first so it flushes remaining audio to the queue.
-        if self._recorder:
-            self._recorder.stop()
-            self._recorder.join(timeout=5)
-            self._recorder = None
+        if recorder:
+            recorder.stop()
+            recorder.join(timeout=5)
 
         # 2. Stop pipeline -- it will drain any remaining audio chunks before
         #    exiting.  Use a generous timeout so CPU transcription can finish.
-        if self._pipeline:
-            self._pipeline.stop()
-            self._pipeline.join(timeout=60)
-            if self._pipeline.is_alive():
+        if pipeline:
+            pipeline.stop()
+            pipeline.join(timeout=60)
+            if pipeline.is_alive():
                 log.warning("Pipeline thread still running after join timeout")
-            self._pipeline = None
 
         # 3. Unload model only after pipeline is done.
-        if self._engine:
-            self._engine.unload()
-            self._engine = None
+        if engine:
+            engine.unload()
 
         # Drain any remaining transcript results that arrived after polling stopped
-        if self._writer:
+        if writer:
             try:
                 while True:
                     result = self._transcript_queue.get_nowait()
-                    self._writer.append(result)
+                    writer.append(result)
                     if self._live_view:
                         for seg in result.segments:
                             from hearsay.output.formatter import format_timestamp
                             ts = format_timestamp(
                                 result.chunk_index * 30 + seg["start"]
                             )
-                            self._live_view.append_text(f"[{ts}] {seg['text']}")
+                            safe_after(self._root, 0,
+                                       lambda t=f"[{ts}] {seg['text']}": (
+                                           self._live_view.append_text(t)
+                                           if self._live_view else None
+                                       ))
             except queue.Empty:
                 pass
 
         # Finalize transcript
         duration = None
-        if self._recording_start_time:
-            duration = time.time() - self._recording_start_time
-            self._recording_start_time = None
+        if start_time:
+            duration = time.time() - start_time
 
-        if self._writer:
-            path = self._writer.finalize(total_duration=duration)
+        if writer:
+            path = writer.finalize(total_duration=duration)
             log.info("Transcript saved to %s", path)
-            self._writer = None
 
-        # Update tray
-        if self._tray:
-            self._tray.set_recording(False)
+        # Insert session separator in live view
+        end_time = time.strftime("%I:%M %p")
+        safe_after(self._root, 0, lambda: (
+            self._live_view.append_separator(end_time) if self._live_view else None
+        ))
 
         # Update live view
         safe_after(self._root, 0, lambda: (
@@ -275,6 +328,14 @@ class HearsayApp:
             lambda: SettingsWindow(self._root, self._config_manager),
         )
 
+    def _open_about(self) -> None:
+        """Open the about window."""
+        safe_after(
+            self._root,
+            0,
+            lambda: AboutWindow(self._root),
+        )
+
     def _open_output_dir(self) -> None:
         """Open the output directory in file explorer."""
         path = self._config.output_dir
@@ -286,7 +347,23 @@ class HearsayApp:
     def _quit(self) -> None:
         """Clean shutdown."""
         log.info("Shutting down %s", APP_NAME)
-        self._stop_recording()
+
+        # Run teardown synchronously — responsiveness doesn't matter at exit
+        if self._recording:
+            self._recording = False
+            self._teardown_recording(
+                self._recorder, self._pipeline, self._engine,
+                self._writer, self._recording_start_time,
+            )
+            self._recorder = None
+            self._pipeline = None
+            self._engine = None
+            self._writer = None
+            self._recording_start_time = None
+        elif self._teardown_thread is not None:
+            self._teardown_thread.join(timeout=30)
+            self._teardown_thread = None
+
         if self._tray:
             self._tray.stop()
         safe_after(self._root, 100, self._root.quit)
