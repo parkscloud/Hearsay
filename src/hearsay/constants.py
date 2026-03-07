@@ -1,7 +1,7 @@
 """Application constants and model configuration."""
 
 APP_NAME = "Hearsay"
-APP_VERSION = "1.0.2"
+APP_VERSION = "1.0.3"
 APP_AUTHOR = "Hearsay"
 
 # Audio settings
@@ -40,6 +40,9 @@ AUDIO_SOURCE_BOTH = "both"
 ICON_COLOR_IDLE = (100, 100, 100)       # Gray
 ICON_COLOR_RECORDING = (220, 50, 50)    # Red
 ICON_COLOR_PROCESSING = (50, 150, 220)  # Blue
+
+# Transcript formatting
+PARAGRAPH_GAP_S = 2.0  # Silence gap (seconds) that triggers a paragraph break
 
 # UI
 LIVE_VIEW_POLL_MS = 250  # Poll transcript queue every 250ms

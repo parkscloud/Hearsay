@@ -3,7 +3,7 @@
 
 [Setup]
 AppName=Hearsay
-AppVersion=1.0.2
+AppVersion=1.0.3
 AppPublisher=Hearsay
 AppPublisherURL=https://github.com/parkscloud/Hearsay
 DefaultDirName={autopf}\Hearsay

@@ -24,7 +24,7 @@ Output: `installer_output\HearsaySetup.exe`
 
 ```bash
 # Tag and create the release with the installer attached
-gh release create v1.0.2 installer_output/HearsaySetup.exe --title "Hearsay v1.0.2" --notes "$(cat <<'EOF'
+gh release create v1.0.3 installer_output/HearsaySetup.exe --title "Hearsay v1.0.3" --notes "$(cat <<'EOF'
 ### New features
 
 - **About window** — new "About" menu item in the system tray shows version, author, GitHub link, open-source acknowledgements, and license (closes #3)

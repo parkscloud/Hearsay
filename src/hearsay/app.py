@@ -273,6 +273,13 @@ class HearsayApp:
             path = writer.finalize(total_duration=duration)
             log.info("Transcript saved to %s", path)
 
+            # Post-process: clean up fillers, duplicates, whitespace
+            safe_after(self._root, 0, lambda: (
+                self._live_view.set_status("Formatting transcript...")
+                if self._live_view else None
+            ))
+            writer.post_process()
+
         # Insert session separator in live view
         end_time = time.strftime("%I:%M %p")
         safe_after(self._root, 0, lambda: (
