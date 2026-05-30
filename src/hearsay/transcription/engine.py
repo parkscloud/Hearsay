@@ -44,7 +44,9 @@ class TranscriptionEngine:
     def load(self) -> None:
         """Load the Whisper model into memory."""
         from faster_whisper import WhisperModel
+        from hearsay.transcription.model_manager import resolve_model_path
 
+        model_path = resolve_model_path(self.model_name)
         log.info(
             "Loading model '%s' (device=%s, compute=%s)",
             self.model_name,
@@ -52,7 +54,7 @@ class TranscriptionEngine:
             self.compute_type,
         )
         self._model = WhisperModel(
-            self.model_name,
+            model_path,
             device=self.device,
             compute_type=self.compute_type,
             download_root=str(get_models_dir()),
