@@ -11,6 +11,23 @@ CHUNK_DURATION_S = 30  # Whisper's native context window
 OVERLAP_DURATION_S = 1  # Overlap between chunks to prevent word splitting
 AUDIO_DTYPE = "float32"
 
+# Custom HuggingFace models: short name -> {repo_id, parameters, vram_gb, english_only}
+# These models are in Transformers format and must be converted to CTranslate2 on first use.
+HF_CUSTOM_MODELS: dict[str, dict] = {
+    "small-ko": {
+        "repo_id": "SungBeom/whisper-small-ko",
+        "parameters": "244M",
+        "vram_gb": 2,
+        "english_only": False,
+    },
+    "medium-ko-zeroth": {
+        "repo_id": "seastar105/whisper-medium-ko-zeroth",
+        "parameters": "769M",
+        "vram_gb": 5,
+        "english_only": False,
+    },
+}
+
 # Model table: name -> (parameters, vram_gb, english_only)
 MODEL_TABLE = {
     "tiny": ("39M", 1, False),
@@ -23,6 +40,9 @@ MODEL_TABLE = {
     "medium.en": ("769M", 5, True),
     "large-v3": ("1550M", 10, False),
     "turbo": ("809M", 6, False),
+    # Korean fine-tuned models (HuggingFace, converted to CTranslate2 on first use)
+    "small-ko": ("244M", 2, False),
+    "medium-ko-zeroth": ("769M", 5, False),
 }
 
 # Default model recommendations
