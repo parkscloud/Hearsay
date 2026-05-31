@@ -50,7 +50,7 @@ class MarkdownWriter:
             self._append_fallback(result)
             return
 
-        chunk_offset = result.chunk_index * 30  # seconds offset for this chunk
+        chunk_offset = result.start_time  # absolute seconds offset for this chunk
         pieces: list[str] = []
 
         for seg in result.segments:

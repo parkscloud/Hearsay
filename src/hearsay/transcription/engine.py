@@ -25,6 +25,7 @@ class TranscriptionResult:
     language: str
     language_probability: float
     chunk_index: int
+    start_time: float = 0.0  # absolute offset (s) of this chunk from recording start
 
 
 class TranscriptionEngine:
@@ -74,12 +75,14 @@ class TranscriptionEngine:
         self,
         audio: np.ndarray,
         chunk_index: int = 0,
+        start_time: float = 0.0,
     ) -> TranscriptionResult:
         """Transcribe a float32 16kHz mono audio array.
 
         Args:
             audio: Audio data as float32 numpy array at 16kHz.
             chunk_index: Index of this chunk (for ordering).
+            start_time: Absolute offset (s) of this chunk from recording start.
 
         Returns:
             TranscriptionResult with text and segment details.
@@ -121,6 +124,7 @@ class TranscriptionEngine:
             language=info.language,
             language_probability=info.language_probability,
             chunk_index=chunk_index,
+            start_time=start_time,
         )
 
     def unload(self) -> None:
