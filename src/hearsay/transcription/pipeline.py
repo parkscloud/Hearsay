@@ -42,10 +42,10 @@ class TranscriptionPipeline(StoppableThread):
         log.info("TranscriptionPipeline started")
         while not self.stopped():
             try:
-                chunk_index, audio = self.audio_queue.get(timeout=1.0)
+                chunk_index, start_time, audio = self.audio_queue.get(timeout=1.0)
             except queue.Empty:
                 continue
-            self._process_chunk(chunk_index, audio)
+            self._process_chunk(chunk_index, start_time, audio)
 
         # Drain any audio chunks still in the queue after stop signal.
         # The recorder flushes its buffer before exiting, so these chunks
@@ -53,18 +53,20 @@ class TranscriptionPipeline(StoppableThread):
         log.info("TranscriptionPipeline draining remaining audio chunks")
         while True:
             try:
-                chunk_index, audio = self.audio_queue.get_nowait()
+                chunk_index, start_time, audio = self.audio_queue.get_nowait()
             except queue.Empty:
                 break
-            self._process_chunk(chunk_index, audio)
+            self._process_chunk(chunk_index, start_time, audio)
 
         log.info("TranscriptionPipeline stopped")
 
-    def _process_chunk(self, chunk_index: int, audio) -> None:
+    def _process_chunk(self, chunk_index: int, start_time: float, audio) -> None:
         """Transcribe a single audio chunk and enqueue the result."""
         try:
             t0 = time.perf_counter()
-            result = self.engine.transcribe(audio, chunk_index=chunk_index)
+            result = self.engine.transcribe(
+                audio, chunk_index=chunk_index, start_time=start_time
+            )
             elapsed = time.perf_counter() - t0
             log.info(
                 "Chunk %d transcribed in %.1fs: %s",
@@ -125,6 +127,7 @@ class TranscriptionPipeline(StoppableThread):
                 language=result.language,
                 language_probability=result.language_probability,
                 chunk_index=result.chunk_index,
+                start_time=result.start_time,
             )
 
         # Rebuild text and trim leading segments that were fully covered by the overlap.
@@ -147,4 +150,5 @@ class TranscriptionPipeline(StoppableThread):
             language=result.language,
             language_probability=result.language_probability,
             chunk_index=result.chunk_index,
+            start_time=result.start_time,
         )

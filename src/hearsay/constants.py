@@ -7,8 +7,15 @@ APP_AUTHOR = "Hearsay"
 # Audio settings
 SAMPLE_RATE = 16000  # Whisper expects 16kHz
 CHANNELS = 1  # Whisper expects mono
-CHUNK_DURATION_S = 30  # Whisper's native context window
-OVERLAP_DURATION_S = 1  # Overlap between chunks to prevent word splitting
+# Variable-length chunking driven by trailing-silence detection.
+# A chunk is cut once at least MIN_CHUNK_DURATION_S has accumulated AND the
+# trailing SILENCE_DURATION_S of audio is near-silent — or unconditionally once
+# MAX_CHUNK_DURATION_S (Whisper's native context window) is reached.
+MIN_CHUNK_DURATION_S = 5     # Minimum audio buffered before an early (silence) cut
+MAX_CHUNK_DURATION_S = 30    # Hard cap — Whisper's native context window
+SILENCE_DURATION_S = 1.0     # Trailing near-silence (seconds) that triggers a cut
+SILENCE_RMS_THRESHOLD = 0.01  # RMS on [-1, 1] float audio below which ≈ silence
+OVERLAP_DURATION_S = 1       # Overlap between chunks to prevent word splitting
 AUDIO_DTYPE = "float32"
 
 # Custom HuggingFace models: short name -> {repo_id, parameters, vram_gb, english_only}

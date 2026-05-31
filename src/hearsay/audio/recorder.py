@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 import queue
-import time
 
 import numpy as np
 
@@ -14,20 +13,121 @@ from hearsay.constants import (
     AUDIO_SOURCE_BOTH,
     AUDIO_SOURCE_MIC,
     AUDIO_SOURCE_SYSTEM,
-    CHUNK_DURATION_S,
+    MAX_CHUNK_DURATION_S,
+    MIN_CHUNK_DURATION_S,
     OVERLAP_DURATION_S,
     SAMPLE_RATE,
+    SILENCE_DURATION_S,
+    SILENCE_RMS_THRESHOLD,
 )
 from hearsay.utils.threading_utils import StoppableThread
 
 log = logging.getLogger(__name__)
 
 
+class _ChunkAccumulator:
+    """Accumulates mono 16 kHz float32 audio and decides chunk boundaries.
+
+    A chunk becomes ready when either:
+      * the buffer reaches ``MAX_CHUNK_DURATION_S`` (hard cap), or
+      * at least ``MIN_CHUNK_DURATION_S`` has accumulated AND the trailing
+        ``SILENCE_DURATION_S`` of audio is near-silent.
+
+    Consecutive chunks share ``OVERLAP_DURATION_S`` of audio so the
+    transcription pipeline can stitch words across boundaries.  Each emitted
+    chunk carries its absolute start time (seconds from the start of the
+    recording), so downstream timestamps stay correct despite variable lengths.
+    """
+
+    def __init__(self) -> None:
+        self._buffer: list[np.ndarray] = []
+        self._total = 0          # samples currently buffered
+        self._silence_run = 0    # consecutive trailing near-silent samples
+        self._start_sample = 0   # absolute index of buffer[0] in the recording
+        self.chunk_index = 0
+
+        self._min = int(MIN_CHUNK_DURATION_S * SAMPLE_RATE)
+        self._max = int(MAX_CHUNK_DURATION_S * SAMPLE_RATE)
+        self._silence_needed = int(SILENCE_DURATION_S * SAMPLE_RATE)
+        self._overlap = int(OVERLAP_DURATION_S * SAMPLE_RATE)
+
+    def add(self, mono: np.ndarray, silent: bool | None = None) -> None:
+        """Append a mono frame, updating the trailing-silence run.
+
+        If *silent* is None, silence is computed from this frame's RMS.
+        Callers mixing multiple sources (Both mode) pass an explicit flag.
+        """
+        if mono is None or len(mono) == 0:
+            return
+        self._buffer.append(mono)
+        self._total += len(mono)
+
+        if silent is None:
+            rms = float(np.sqrt(np.mean(mono ** 2)))
+            silent = rms < SILENCE_RMS_THRESHOLD
+
+        if silent:
+            self._silence_run += len(mono)
+        else:
+            self._silence_run = 0
+
+    def ready(self) -> bool:
+        """True when the current buffer should be emitted as a chunk."""
+        if self._total >= self._max:
+            return True
+        return self._total >= self._min and self._silence_run >= self._silence_needed
+
+    def pop(self) -> tuple[int, float, np.ndarray]:
+        """Emit a chunk and retain the overlap tail. Returns (index, start_s, audio)."""
+        data = np.concatenate(self._buffer)
+        emitted_len = min(len(data), self._max)
+        chunk = data[:emitted_len]
+        start_time = self._start_sample / SAMPLE_RATE
+        idx = self.chunk_index
+
+        # Advance by the unique (non-overlapping) audio we just consumed.
+        advance = max(0, emitted_len - self._overlap)
+        self._start_sample += advance
+
+        if self._overlap > 0:
+            leftover = data[emitted_len - self._overlap:]
+        else:
+            leftover = data[emitted_len:]
+        self._buffer = [leftover] if len(leftover) else []
+        self._total = int(len(leftover))
+        self._silence_run = 0
+        self.chunk_index += 1
+        return idx, start_time, chunk
+
+    def flush(self) -> tuple[int, float, np.ndarray] | None:
+        """Emit whatever remains (if > 1s) when recording stops."""
+        if self._total <= SAMPLE_RATE:  # less than 1 second — discard
+            return None
+        data = np.concatenate(self._buffer)
+        start_time = self._start_sample / SAMPLE_RATE
+        idx = self.chunk_index
+        self._buffer = []
+        self._total = 0
+        self.chunk_index += 1
+        return idx, start_time, data
+
+
+def _rms(mono: np.ndarray) -> float:
+    """Root-mean-square level of a mono float32 frame."""
+    if mono is None or len(mono) == 0:
+        return 0.0
+    return float(np.sqrt(np.mean(mono ** 2)))
+
+
 class AudioRecorder(StoppableThread):
-    """Record audio and push 30-second chunks to a queue.
+    """Record audio and push variable-length chunks to a queue.
+
+    Each queue item is a ``(chunk_index, start_time_s, np.ndarray)`` tuple,
+    where ``start_time_s`` is the chunk's absolute offset from the start of the
+    recording.
 
     Args:
-        audio_queue: Queue to push (chunk_index, np.ndarray) tuples.
+        audio_queue: Queue to push chunks to.
         source: One of 'system', 'microphone', 'both'.
         loopback_device_index: PyAudioWPatch device index for loopback.
         mic_device_index: sounddevice device index for mic.
@@ -108,32 +208,16 @@ class AudioRecorder(StoppableThread):
         """Record microphone via sounddevice."""
         import sounddevice as sd
 
-        buffer: list[np.ndarray] = []
-        chunk_samples = int(CHUNK_DURATION_S * SAMPLE_RATE)
-        overlap_samples = int(OVERLAP_DURATION_S * SAMPLE_RATE)
-        chunk_index = 0
+        acc = _ChunkAccumulator()
 
         def callback(indata: np.ndarray, frames: int, time_info: object, status: object) -> None:
-            nonlocal chunk_index
             mono = resample(indata.copy(), self.mic_rate, self.mic_channels)
-            buffer.append(mono)
+            acc.add(mono)
+            if acc.ready():
+                self.audio_queue.put(acc.pop())
 
-            total = sum(len(b) for b in buffer)
-            if total >= chunk_samples:
-                chunk = np.concatenate(buffer)[:chunk_samples]
-                self.audio_queue.put((chunk_index, chunk))
-                chunk_index += 1
-                # Keep overlap
-                if overlap_samples > 0:
-                    leftover = np.concatenate(buffer)[chunk_samples - overlap_samples:]
-                    buffer.clear()
-                    buffer.append(leftover)
-                else:
-                    buffer.clear()
-
-        device = self.mic_device_index
         with sd.InputStream(
-            device=device,
+            device=self.mic_device_index,
             samplerate=self.mic_rate,
             channels=self.mic_channels,
             dtype="float32",
@@ -142,11 +226,9 @@ class AudioRecorder(StoppableThread):
             while not self.stopped():
                 self.wait(timeout=0.5)
 
-        # Flush remaining audio
-        if buffer:
-            chunk = np.concatenate(buffer)
-            if len(chunk) > SAMPLE_RATE:  # Only if > 1 second
-                self.audio_queue.put((chunk_index, chunk))
+        final = acc.flush()
+        if final is not None:
+            self.audio_queue.put(final)
 
     def _record_both(self) -> None:
         """Record both loopback and mic, mix them.
@@ -156,7 +238,8 @@ class AudioRecorder(StoppableThread):
         occurs when PyAudioWPatch and sounddevice run on the same thread.
         The mic stream uses PyAudio's callback mode so it accumulates data
         asynchronously while the main loop drives off blocking loopback
-        reads.
+        reads.  Chunk boundaries are decided on the *combined* activity, so a
+        chunk is only cut when both sources fall silent.
         """
         import pyaudiowpatch as pyaudio
 
@@ -230,10 +313,15 @@ class AudioRecorder(StoppableThread):
             mic_stream.start_stream()
 
             # --- Main loop (driven by blocking loopback reads) ---
-            chunk_samples = int(CHUNK_DURATION_S * SAMPLE_RATE)
-            overlap_samples = int(OVERLAP_DURATION_S * SAMPLE_RATE)
-            loopback_buf: list[np.ndarray] = []
-            chunk_index = 0
+            acc = _ChunkAccumulator()
+
+            def mix_with_mic(lb_chunk: np.ndarray) -> np.ndarray:
+                if not mic_buffer:
+                    return lb_chunk
+                mic_chunk = np.concatenate(mic_buffer)[:len(lb_chunk)]
+                if len(mic_chunk) < len(lb_chunk):
+                    mic_chunk = np.pad(mic_chunk, (0, len(lb_chunk) - len(mic_chunk)))
+                return mix_streams(lb_chunk, mic_chunk)
 
             while not self.stopped():
                 try:
@@ -241,49 +329,24 @@ class AudioRecorder(StoppableThread):
                 except Exception:
                     break
                 audio = np.frombuffer(raw, dtype=np.int16)
-                mono = resample(audio, self.loopback_rate, self.loopback_channels)
-                loopback_buf.append(mono)
+                lb_mono = resample(audio, self.loopback_rate, self.loopback_channels)
 
-                total = sum(len(b) for b in loopback_buf)
-                if total >= chunk_samples:
-                    lb_chunk = np.concatenate(loopback_buf)[:chunk_samples]
-                    mic_samples = sum(len(b) for b in mic_buffer)
-                    log.debug(
-                        "Mixing chunk %d: loopback=%d mic=%d samples",
-                        chunk_index, len(lb_chunk), mic_samples,
-                    )
+                # Combined silence: silent only when both sources are quiet.
+                # The latest mic frame approximates current mic activity.
+                mic_silent = _rms(mic_buffer[-1]) < SILENCE_RMS_THRESHOLD if mic_buffer else True
+                silent = (_rms(lb_mono) < SILENCE_RMS_THRESHOLD) and mic_silent
 
-                    if mic_buffer:
-                        mic_chunk = np.concatenate(mic_buffer)[:chunk_samples]
-                        if len(mic_chunk) < chunk_samples:
-                            mic_chunk = np.pad(mic_chunk, (0, chunk_samples - len(mic_chunk)))
-                        mixed = mix_streams(lb_chunk, mic_chunk)
-                    else:
-                        mixed = lb_chunk
-
-                    self.audio_queue.put((chunk_index, mixed))
-                    chunk_index += 1
-
-                    if overlap_samples > 0:
-                        leftover = np.concatenate(loopback_buf)[chunk_samples - overlap_samples:]
-                        loopback_buf.clear()
-                        loopback_buf.append(leftover)
-                    else:
-                        loopback_buf.clear()
+                acc.add(lb_mono, silent=silent)
+                if acc.ready():
+                    idx, start_time, lb_chunk = acc.pop()
+                    self.audio_queue.put((idx, start_time, mix_with_mic(lb_chunk)))
                     mic_buffer.clear()
 
             # --- Flush remaining audio ---
-            if loopback_buf:
-                lb_chunk = np.concatenate(loopback_buf)
-                if len(lb_chunk) > SAMPLE_RATE:  # Only if > 1 second
-                    if mic_buffer:
-                        mic_chunk = np.concatenate(mic_buffer)[:len(lb_chunk)]
-                        if len(mic_chunk) < len(lb_chunk):
-                            mic_chunk = np.pad(mic_chunk, (0, len(lb_chunk) - len(mic_chunk)))
-                        mixed = mix_streams(lb_chunk, mic_chunk)
-                    else:
-                        mixed = lb_chunk
-                    self.audio_queue.put((chunk_index, mixed))
+            final = acc.flush()
+            if final is not None:
+                idx, start_time, lb_chunk = final
+                self.audio_queue.put((idx, start_time, mix_with_mic(lb_chunk)))
 
             mic_stream.stop_stream()
             mic_stream.close()
@@ -298,11 +361,8 @@ class AudioRecorder(StoppableThread):
         sr: int,
         channels: int,
     ) -> None:
-        """Generic chunking loop for loopback-style streams."""
-        chunk_samples = int(CHUNK_DURATION_S * SAMPLE_RATE)
-        overlap_samples = int(OVERLAP_DURATION_S * SAMPLE_RATE)
-        buffer: list[np.ndarray] = []
-        chunk_index = 0
+        """Generic chunking loop for loopback-style (blocking-read) streams."""
+        acc = _ChunkAccumulator()
 
         while not self.stopped():
             try:
@@ -311,25 +371,18 @@ class AudioRecorder(StoppableThread):
                 break
             audio = np.frombuffer(raw, dtype=np.int16)
             mono = resample(audio, sr, channels)
-            buffer.append(mono)
+            acc.add(mono)
 
-            total = sum(len(b) for b in buffer)
-            if total >= chunk_samples:
-                chunk = np.concatenate(buffer)[:chunk_samples]
-                self.audio_queue.put((chunk_index, chunk))
-                chunk_index += 1
-                log.debug("Audio chunk %d queued (%d samples)", chunk_index - 1, len(chunk))
+            if acc.ready():
+                idx, start_time, chunk = acc.pop()
+                self.audio_queue.put((idx, start_time, chunk))
+                log.debug(
+                    "Audio chunk %d queued (%d samples, t=%.1fs)",
+                    idx, len(chunk), start_time,
+                )
 
-                if overlap_samples > 0:
-                    leftover = np.concatenate(buffer)[chunk_samples - overlap_samples:]
-                    buffer.clear()
-                    buffer.append(leftover)
-                else:
-                    buffer.clear()
-
-        # Flush remaining audio
-        if buffer:
-            chunk = np.concatenate(buffer)
-            if len(chunk) > SAMPLE_RATE:  # Only if > 1 second
-                self.audio_queue.put((chunk_index, chunk))
-                log.debug("Final audio chunk %d queued (%d samples)", chunk_index, len(chunk))
+        final = acc.flush()
+        if final is not None:
+            idx, start_time, chunk = final
+            self.audio_queue.put((idx, start_time, chunk))
+            log.debug("Final audio chunk %d queued (%d samples)", idx, len(chunk))

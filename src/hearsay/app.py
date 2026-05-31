@@ -254,7 +254,7 @@ class HearsayApp:
                         for seg in result.segments:
                             from hearsay.output.formatter import format_timestamp
                             ts = format_timestamp(
-                                result.chunk_index * 30 + seg["start"]
+                                result.start_time + seg["start"]
                             )
                             safe_after(self._root, 0,
                                        lambda t=f"[{ts}] {seg['text']}": (
@@ -307,7 +307,7 @@ class HearsayApp:
                     for seg in result.segments:
                         from hearsay.output.formatter import format_timestamp
                         ts = format_timestamp(
-                            result.chunk_index * 30 + seg["start"]
+                            result.start_time + seg["start"]
                         )
                         self._live_view.append_text(f"[{ts}] {seg['text']}")
         except queue.Empty:
