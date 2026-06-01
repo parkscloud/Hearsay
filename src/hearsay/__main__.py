@@ -8,6 +8,11 @@ def main() -> None:
 
     setup_logging()
 
+    # Must run before any ctranslate2 / faster-whisper import on Windows
+    from hearsay.utils.cuda_dlls import register_nvidia_dlls
+
+    register_nvidia_dlls()
+
     from hearsay.app import HearsayApp
 
     app = HearsayApp()
