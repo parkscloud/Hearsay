@@ -42,6 +42,17 @@ class AppConfig:
     # UI
     show_live_view_on_start: bool = False
 
+    # Hotkey
+    hotkey: str = "ctrl+alt+r"
+
+    # Beep notifications
+    beep_on_start: bool = True
+    beep_on_stop: bool = True
+    beep_on_save: bool = True
+
+    # Clipboard
+    copy_to_clipboard: bool = False
+
 
 class ConfigManager:
     """Load and save AppConfig to JSON in %APPDATA%\\Hearsay."""

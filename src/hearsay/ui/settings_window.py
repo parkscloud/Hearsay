@@ -28,15 +28,22 @@ log = logging.getLogger(__name__)
 class SettingsWindow(ctk.CTkToplevel):
     """Settings editor window."""
 
-    def __init__(self, master: ctk.CTk, config_manager: ConfigManager) -> None:
+    def __init__(
+        self,
+        master: ctk.CTk,
+        config_manager: ConfigManager,
+        on_save: "Callable | None" = None,
+    ) -> None:
         super().__init__(master)
         self.title(f"{APP_NAME} Settings")
-        self.geometry("550x520")
+        self.geometry("550x620")
         self.resizable(False, False)
 
         self._config_manager = config_manager
         self._config = config_manager.config
         self._dl_frame: ctk.CTkFrame | None = None
+        self._on_save = on_save
+        self._capturing = False
 
         self._build_ui()
         self.grab_set()
@@ -50,7 +57,7 @@ class SettingsWindow(ctk.CTkToplevel):
         ).pack(pady=(15, 10))
 
         # Scrollable content
-        scroll = ctk.CTkScrollableFrame(self, width=490, height=360)
+        scroll = ctk.CTkScrollableFrame(self, width=490, height=460)
         scroll.pack(fill="both", expand=True, padx=20, pady=(0, 10))
 
         # ── Audio Source ──
@@ -145,6 +152,55 @@ class SettingsWindow(ctk.CTkToplevel):
             dir_frame, text="Browse", width=70, command=self._browse
         ).pack(side="left")
 
+        # ── Hotkey ──
+        ctk.CTkLabel(scroll, text="Recording Hotkey", font=("Segoe UI", 14, "bold")).pack(
+            anchor="w", pady=(15, 5)
+        )
+        hotkey_frame = ctk.CTkFrame(scroll, fg_color="transparent")
+        hotkey_frame.pack(anchor="w", padx=15, fill="x")
+
+        self._hotkey_var = ctk.StringVar(value=self._config.hotkey)
+        self._hotkey_entry = ctk.CTkEntry(
+            hotkey_frame, textvariable=self._hotkey_var, width=200, state="readonly"
+        )
+        self._hotkey_entry.pack(side="left", padx=(0, 8))
+        self._capture_btn = ctk.CTkButton(
+            hotkey_frame, text="Capture", width=80, command=self._start_capture
+        )
+        self._capture_btn.pack(side="left")
+        ctk.CTkLabel(
+            scroll, text="Press Ctrl+Alt+R or any modifier+key combo",
+            font=("Segoe UI", 10), text_color="gray"
+        ).pack(anchor="w", padx=15)
+
+        # ── Beep Notifications ──
+        ctk.CTkLabel(scroll, text="Beep Notifications", font=("Segoe UI", 14, "bold")).pack(
+            anchor="w", pady=(15, 5)
+        )
+        self._beep_start_var = ctk.BooleanVar(value=self._config.beep_on_start)
+        self._beep_stop_var = ctk.BooleanVar(value=self._config.beep_on_stop)
+        self._beep_save_var = ctk.BooleanVar(value=self._config.beep_on_save)
+        ctk.CTkCheckBox(
+            scroll, text="녹음 시작 시 비프음", variable=self._beep_start_var
+        ).pack(anchor="w", padx=15, pady=2)
+        ctk.CTkCheckBox(
+            scroll, text="녹음 완료 시 비프음", variable=self._beep_stop_var
+        ).pack(anchor="w", padx=15, pady=2)
+        ctk.CTkCheckBox(
+            scroll, text="MD 파일 저장 완료 시 비프음", variable=self._beep_save_var
+        ).pack(anchor="w", padx=15, pady=2)
+
+        # ── Clipboard ──
+        ctk.CTkLabel(scroll, text="Clipboard", font=("Segoe UI", 14, "bold")).pack(
+            anchor="w", pady=(15, 5)
+        )
+        self._clipboard_var = ctk.BooleanVar(value=self._config.copy_to_clipboard)
+        ctk.CTkCheckBox(
+            scroll,
+            text="저장 완료 시 전체 텍스트를 클립보드에 복사",
+            variable=self._clipboard_var,
+        ).pack(anchor="w", padx=15, pady=2)
+
         # ── Buttons ──
         self._btn_frame = ctk.CTkFrame(self)
         self._btn_frame.pack(fill="x", padx=20, pady=(0, 15))
@@ -158,6 +214,57 @@ class SettingsWindow(ctk.CTkToplevel):
             command=self._cancel
         )
         self._cancel_btn.pack(side="right", padx=5)
+
+    def _start_capture(self) -> None:
+        self._capturing = True
+        self._hotkey_entry.configure(state="normal")
+        self._hotkey_var.set("Press hotkey...")
+        self._hotkey_entry.configure(state="readonly")
+        self._capture_btn.configure(text="Cancel", command=self._cancel_capture)
+        self._hotkey_entry.focus_set()
+        self.bind("<KeyPress>", self._on_key_capture)
+
+    def _cancel_capture(self) -> None:
+        self._capturing = False
+        self.unbind("<KeyPress>")
+        self._hotkey_entry.configure(state="normal")
+        self._hotkey_var.set(self._config.hotkey)
+        self._hotkey_entry.configure(state="readonly")
+        self._capture_btn.configure(text="Capture", command=self._start_capture)
+
+    def _on_key_capture(self, event) -> str:
+        keysym = event.keysym.lower()
+        modifier_only = {
+            "control_l", "control_r", "alt_l", "alt_r",
+            "shift_l", "shift_r", "super_l", "super_r",
+        }
+        if keysym in modifier_only:
+            return "break"
+        if keysym == "escape":
+            self._cancel_capture()
+            return "break"
+
+        parts = []
+        if event.state & 0x4:       # Ctrl
+            parts.append("ctrl")
+        if event.state & 0x1:       # Shift
+            parts.append("shift")
+        if event.state & 0x20000:   # Alt (Windows)
+            parts.append("alt")
+
+        if not parts:
+            return "break"          # require at least one modifier
+
+        parts.append(keysym)
+        combo = "+".join(parts)
+
+        self._capturing = False
+        self.unbind("<KeyPress>")
+        self._hotkey_entry.configure(state="normal")
+        self._hotkey_var.set(combo)
+        self._hotkey_entry.configure(state="readonly")
+        self._capture_btn.configure(text="Capture", command=self._start_capture)
+        return "break"
 
     def _on_model_changed(self, name: str) -> None:
         self._update_model_hint(name)
@@ -196,10 +303,17 @@ class SettingsWindow(ctk.CTkToplevel):
         self._config.language = self._lang_var.get()
         self._config.vad_filter = self._vad_var.get()
         self._config.output_dir = self._dir_var.get()
+        self._config.hotkey = self._hotkey_var.get()
+        self._config.beep_on_start = self._beep_start_var.get()
+        self._config.beep_on_stop = self._beep_stop_var.get()
+        self._config.beep_on_save = self._beep_save_var.get()
+        self._config.copy_to_clipboard = self._clipboard_var.get()
         self._config_manager.save()
         log.info("Settings saved")
         self.grab_release()
         self.destroy()
+        if self._on_save:
+            self._on_save()
 
     def _start_download(self, model_name: str) -> None:
         """Expand window, show progress, and download + convert the model."""

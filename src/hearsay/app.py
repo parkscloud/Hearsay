@@ -52,6 +52,7 @@ class HearsayApp:
         self._recording = False
         self._recording_start_time: float | None = None
         self._teardown_thread: threading.Thread | None = None
+        self._hotkey_combo: str | None = None
 
         # UI
         apply_theme()
@@ -83,6 +84,7 @@ class HearsayApp:
             self._root.after(500, self._show_wizard)
         else:
             log.info("Config loaded, ready to record")
+            self._register_hotkey()
 
         # Start tkinter event loop
         self._root.mainloop()
@@ -99,6 +101,7 @@ class HearsayApp:
         """Called when the setup wizard finishes."""
         self._config = self._config_manager.config
         log.info("Wizard complete, app ready")
+        self._register_hotkey()
 
     def _start_recording(self, source: str) -> None:
         """Start recording from the given source."""
@@ -178,7 +181,8 @@ class HearsayApp:
             self._tray.set_recording(True)
         if self._live_view:
             self._live_view.set_status("Recording...")
-        # Start polling transcript queue
+        if self._config.beep_on_start:
+            threading.Thread(target=self._play_beep, args=("start",), daemon=True).start()
         self._poll_transcripts()
 
     def _stop_recording(self) -> None:
@@ -193,6 +197,9 @@ class HearsayApp:
 
         log.info("Stopping recording")
         self._recording = False
+
+        if self._config.beep_on_stop:
+            threading.Thread(target=self._play_beep, args=("stop",), daemon=True).start()
 
         # Update tray immediately so the menu is responsive
         if self._tray:
@@ -286,6 +293,14 @@ class HearsayApp:
             ))
             writer.post_process()
 
+            if self._config.beep_on_save:
+                self._play_beep("save")
+
+            if self._config.copy_to_clipboard:
+                text = self._extract_clipboard_text(writer)
+                if text:
+                    safe_after(self._root, 0, lambda t=text: self._copy_to_clipboard(t))
+
         # Insert session separator in live view
         end_time = time.strftime("%I:%M %p")
         safe_after(self._root, 0, lambda: (
@@ -338,8 +353,16 @@ class HearsayApp:
         safe_after(
             self._root,
             0,
-            lambda: SettingsWindow(self._root, self._config_manager),
+            lambda: SettingsWindow(
+                self._root,
+                self._config_manager,
+                on_save=self._on_settings_saved,
+            ),
         )
+
+    def _on_settings_saved(self) -> None:
+        self._config = self._config_manager.config
+        self._register_hotkey()
 
     def _open_about(self) -> None:
         """Open the about window."""
@@ -414,6 +437,72 @@ class HearsayApp:
             command=open_cuda_download,
         ).pack(side="left", padx=8)
 
+    # ── Hotkey ────────────────────────────────────────────────────────────────
+
+    def _register_hotkey(self) -> None:
+        try:
+            import keyboard as kb
+            self._unregister_hotkey()
+            combo = self._config.hotkey
+            if combo:
+                kb.add_hotkey(combo, self._toggle_recording_hotkey)
+                self._hotkey_combo = combo
+                log.info("Hotkey registered: %s", combo)
+        except Exception:
+            log.warning("Failed to register hotkey", exc_info=True)
+
+    def _unregister_hotkey(self) -> None:
+        try:
+            import keyboard as kb
+            if self._hotkey_combo:
+                kb.remove_hotkey(self._hotkey_combo)
+                self._hotkey_combo = None
+        except Exception:
+            pass
+
+    def _toggle_recording_hotkey(self) -> None:
+        """Called from the keyboard library thread — must dispatch to main thread."""
+        if self._recording:
+            safe_after(self._root, 0, self._stop_recording)
+        else:
+            safe_after(self._root, 0, lambda: self._start_recording(self._config.audio_source))
+
+    # ── Beep ──────────────────────────────────────────────────────────────────
+
+    def _play_beep(self, event: str) -> None:
+        try:
+            import winsound
+            if event == "start":
+                winsound.Beep(880, 120)
+            elif event == "stop":
+                winsound.Beep(520, 180)
+            elif event == "save":
+                winsound.Beep(660, 80)
+                winsound.Beep(880, 160)
+        except Exception:
+            pass
+
+    # ── Clipboard ─────────────────────────────────────────────────────────────
+
+    def _extract_clipboard_text(self, writer: MarkdownWriter) -> str:
+        try:
+            content = writer.file_path.read_text(encoding="utf-8")
+            header_end = content.index("\n\n") + 2
+            footer_idx = content.rfind("\n---\n")
+            body = content[header_end:footer_idx] if footer_idx != -1 else content[header_end:]
+            return body.strip()
+        except Exception:
+            log.warning("Failed to extract clipboard text", exc_info=True)
+            return ""
+
+    def _copy_to_clipboard(self, text: str) -> None:
+        try:
+            self._root.clipboard_clear()
+            self._root.clipboard_append(text)
+            log.info("Transcript copied to clipboard (%d chars)", len(text))
+        except Exception:
+            log.warning("Failed to copy to clipboard", exc_info=True)
+
     def _open_output_dir(self) -> None:
         """Open the output directory in file explorer."""
         path = self._config.output_dir
@@ -442,6 +531,7 @@ class HearsayApp:
             self._teardown_thread.join(timeout=30)
             self._teardown_thread = None
 
+        self._unregister_hotkey()
         if self._tray:
             self._tray.stop()
         safe_after(self._root, 100, self._root.quit)
