@@ -12,6 +12,10 @@ from hearsay.utils.paths import get_models_dir
 log = logging.getLogger(__name__)
 
 
+class CudaUnavailableError(RuntimeError):
+    """Raised when GPU is configured but CUDA runtime DLLs are missing."""
+
+
 @dataclass
 class TranscriptionResult:
     """Result from transcribing one audio chunk."""
@@ -59,22 +63,9 @@ class TranscriptionEngine:
                 download_root=str(get_models_dir()),
             )
         except RuntimeError as exc:
-            # CUDA runtime DLLs missing (e.g. cublas64_12.dll) — driver present
-            # but CUDA Toolkit not installed. Fall back to CPU automatically.
             if self.device != "cpu" and "cannot be loaded" in str(exc):
-                log.warning(
-                    "CUDA runtime unavailable (%s). Falling back to CPU.", exc
-                )
-                self.device = "cpu"
-                self.compute_type = "int8"
-                self._model = WhisperModel(
-                    self.model_name,
-                    device="cpu",
-                    compute_type="int8",
-                    download_root=str(get_models_dir()),
-                )
-            else:
-                raise
+                raise CudaUnavailableError(str(exc)) from exc
+            raise
         log.info("Model loaded successfully (device=%s)", self.device)
 
     def transcribe(

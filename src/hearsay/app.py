@@ -9,13 +9,15 @@ import subprocess
 import threading
 import time
 
+import webbrowser
+
 import customtkinter as ctk
 
 from hearsay.audio.recorder import AudioRecorder
 from hearsay.config import ConfigManager
-from hearsay.constants import APP_NAME, LIVE_VIEW_POLL_MS
+from hearsay.constants import APP_NAME, DEFAULT_CPU_COMPUTE, LIVE_VIEW_POLL_MS
 from hearsay.output.markdown_writer import MarkdownWriter
-from hearsay.transcription.engine import TranscriptionEngine
+from hearsay.transcription.engine import CudaUnavailableError, TranscriptionEngine
 from hearsay.transcription.pipeline import TranscriptionPipeline
 from hearsay.ui.about_window import AboutWindow
 from hearsay.ui.live_view import LiveTranscriptWindow
@@ -138,7 +140,11 @@ class HearsayApp:
                 except queue.Empty:
                     break
 
-            self._engine.load()
+            try:
+                self._engine.load()
+            except CudaUnavailableError:
+                safe_after(self._root, 0, lambda: self._handle_cuda_error(source))
+                return
 
             # Start pipeline
             self._pipeline = TranscriptionPipeline(
@@ -342,6 +348,71 @@ class HearsayApp:
             0,
             lambda: AboutWindow(self._root),
         )
+
+    def _handle_cuda_error(self, source: str) -> None:
+        """Called on main thread when CUDA runtime DLLs are missing."""
+        self._recording = False
+        self._engine = None
+        if self._tray:
+            self._tray.set_recording(False)
+        if self._live_view:
+            self._live_view.set_status("Idle")
+        self._show_cuda_error_dialog(source)
+
+    def _show_cuda_error_dialog(self, source: str) -> None:
+        """Show a dialog offering CPU fallback or CUDA Toolkit install link."""
+        dialog = ctk.CTkToplevel(self._root)
+        dialog.title("GPU를 사용할 수 없습니다")
+        dialog.resizable(False, False)
+        dialog.grab_set()
+
+        # Center on screen
+        dialog.update_idletasks()
+        w, h = 420, 220
+        x = (dialog.winfo_screenwidth() - w) // 2
+        y = (dialog.winfo_screenheight() - h) // 2
+        dialog.geometry(f"{w}x{h}+{x}+{y}")
+
+        ctk.CTkLabel(
+            dialog,
+            text="CUDA 런타임 라이브러리를 찾을 수 없습니다.",
+            font=ctk.CTkFont(size=14, weight="bold"),
+        ).pack(pady=(20, 4))
+
+        ctk.CTkLabel(
+            dialog,
+            text=(
+                "GPU 설정이 선택되어 있지만 CUDA Toolkit 12.x가\n"
+                "설치되어 있지 않아 GPU로 실행할 수 없습니다.\n\n"
+                "계속하려면 CPU로 변경하거나 CUDA Toolkit을 설치하세요."
+            ),
+            justify="center",
+        ).pack(pady=(0, 16))
+
+        btn_frame = ctk.CTkFrame(dialog, fg_color="transparent")
+        btn_frame.pack()
+
+        def switch_to_cpu() -> None:
+            dialog.destroy()
+            self._config.device = "cpu"
+            self._config.compute_type = DEFAULT_CPU_COMPUTE
+            self._config_manager.save()
+            log.info("Switched to CPU per user request after CUDA error")
+            self._start_recording(source)
+
+        def open_cuda_download() -> None:
+            dialog.destroy()
+            webbrowser.open("https://developer.nvidia.com/cuda-downloads")
+
+        ctk.CTkButton(
+            btn_frame, text="CPU로 변경", width=160, command=switch_to_cpu,
+        ).pack(side="left", padx=8)
+
+        ctk.CTkButton(
+            btn_frame, text="CUDA Toolkit 설치", width=160,
+            fg_color="transparent", border_width=1,
+            command=open_cuda_download,
+        ).pack(side="left", padx=8)
 
     def _open_output_dir(self) -> None:
         """Open the output directory in file explorer."""
