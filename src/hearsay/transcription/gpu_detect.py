@@ -99,6 +99,22 @@ def _vram_gb_from_name(name: str) -> float:
     return 4.0  # conservative default
 
 
+def _cuda_runtime_usable() -> bool:
+    """Probe the CUDA runtime by allocating a tiny CTranslate2 storage object.
+
+    ctranslate2.get_cuda_device_count() only checks the driver; the actual
+    runtime DLLs (cublas64_12.dll etc.) are loaded lazily on first use.
+    This call forces that load so we can detect a broken installation early.
+    """
+    try:
+        import ctranslate2
+        ctranslate2.StorageView([1], ctranslate2.DataType.int8, ctranslate2.Device.cuda)
+        return True
+    except Exception as exc:
+        log.warning("CUDA runtime probe failed: %s", exc)
+        return False
+
+
 def detect_gpu() -> GPUInfo:
     """Detect CUDA GPU via ctranslate2 (same backend faster-whisper uses)."""
     try:
@@ -106,41 +122,48 @@ def detect_gpu() -> GPUInfo:
 
         cuda_count = ctranslate2.get_cuda_device_count()
         if cuda_count > 0:
-            # Try to get GPU name via torch if available; otherwise fall back gracefully
-            gpu_name = ""
-            vram_gb = 0.0
-            try:
-                import torch
-                if torch.cuda.is_available():
-                    gpu_name = torch.cuda.get_device_name(0)
-                    vram_bytes = torch.cuda.get_device_properties(0).total_mem
-                    vram_gb = round(vram_bytes / (1024**3), 1)
-            except Exception:
-                pass
-
-            if not gpu_name:
-                gpu_name = _gpu_name_from_nvidia_smi() or "CUDA Device 0"
-
-            if vram_gb == 0.0:
-                vram_gb = _vram_gb_from_nvidia_smi() or _vram_gb_from_name(gpu_name)
-
-            log.info("CUDA GPU found: %s (%.1f GB VRAM)", gpu_name, vram_gb)
-
-            if vram_gb >= 6:
-                model = DEFAULT_GPU_MODEL
-            elif vram_gb >= 2:
-                model = "small.en"
+            if not _cuda_runtime_usable():
+                log.warning(
+                    "CUDA device found but runtime DLLs are missing "
+                    "(install CUDA Toolkit 12.x). Falling back to CPU."
+                )
+                # Fall through to CPU return below
             else:
-                model = "tiny.en"
+                # Try to get GPU name via torch if available; otherwise fall back gracefully
+                gpu_name = ""
+                vram_gb = 0.0
+                try:
+                    import torch
+                    if torch.cuda.is_available():
+                        gpu_name = torch.cuda.get_device_name(0)
+                        vram_bytes = torch.cuda.get_device_properties(0).total_mem
+                        vram_gb = round(vram_bytes / (1024**3), 1)
+                except Exception:
+                    pass
 
-            return GPUInfo(
-                cuda_available=True,
-                gpu_name=gpu_name,
-                vram_gb=vram_gb,
-                recommended_model=model,
-                recommended_compute=DEFAULT_GPU_COMPUTE,
-                recommended_device="cuda",
-            )
+                if not gpu_name:
+                    gpu_name = _gpu_name_from_nvidia_smi() or "CUDA Device 0"
+
+                if vram_gb == 0.0:
+                    vram_gb = _vram_gb_from_nvidia_smi() or _vram_gb_from_name(gpu_name)
+
+                log.info("CUDA GPU found: %s (%.1f GB VRAM)", gpu_name, vram_gb)
+
+                if vram_gb >= 6:
+                    model = DEFAULT_GPU_MODEL
+                elif vram_gb >= 2:
+                    model = "small.en"
+                else:
+                    model = "tiny.en"
+
+                return GPUInfo(
+                    cuda_available=True,
+                    gpu_name=gpu_name,
+                    vram_gb=vram_gb,
+                    recommended_model=model,
+                    recommended_compute=DEFAULT_GPU_COMPUTE,
+                    recommended_device="cuda",
+                )
         log.info("No CUDA devices found via ctranslate2")
     except ImportError:
         log.info("ctranslate2 not installed, assuming CPU-only")
