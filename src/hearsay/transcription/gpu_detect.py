@@ -27,6 +27,37 @@ class GPUInfo:
     recommended_device: str
 
 
+def _gpu_name_from_nvidia_smi() -> str:
+    """Query GPU name via nvidia-smi without requiring torch."""
+    try:
+        import subprocess
+        result = subprocess.run(
+            ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if result.returncode == 0:
+            return result.stdout.strip().splitlines()[0].strip()
+    except Exception:
+        pass
+    return ""
+
+
+def _vram_gb_from_nvidia_smi() -> float:
+    """Query total VRAM in GB via nvidia-smi."""
+    try:
+        import subprocess
+        result = subprocess.run(
+            ["nvidia-smi", "--query-gpu=memory.total", "--format=csv,noheader,nounits"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if result.returncode == 0:
+            mib = float(result.stdout.strip().splitlines()[0].strip())
+            return round(mib / 1024, 1)
+    except Exception:
+        pass
+    return 0.0
+
+
 def _vram_gb_from_name(name: str) -> float:
     """Estimate VRAM from GPU name when ctranslate2 doesn't expose memory info."""
     name_lower = name.lower()
@@ -88,11 +119,10 @@ def detect_gpu() -> GPUInfo:
                 pass
 
             if not gpu_name:
-                # ctranslate2 doesn't expose device names; use a generic label
-                gpu_name = f"CUDA Device 0"
+                gpu_name = _gpu_name_from_nvidia_smi() or "CUDA Device 0"
 
             if vram_gb == 0.0:
-                vram_gb = _vram_gb_from_name(gpu_name)
+                vram_gb = _vram_gb_from_nvidia_smi() or _vram_gb_from_name(gpu_name)
 
             log.info("CUDA GPU found: %s (%.1f GB VRAM)", gpu_name, vram_gb)
 
