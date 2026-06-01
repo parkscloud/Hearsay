@@ -5,3 +5,5 @@ numpy>=1.24.0
 customtkinter>=5.2.0
 pystray>=0.19.5
 Pillow>=10.0.0
+nvidia-cublas-cu12>=12.0
+nvidia-cuda-runtime-cu12>=12.0
