@@ -44,6 +44,10 @@ def _nvidia_bin_dirs() -> list[Path]:
 def register_nvidia_dlls() -> bool:
     """Add NVIDIA pip-package bin dirs to the Windows DLL search path.
 
+    Uses both os.add_dll_directory() (for Python extension modules) and
+    prepends to PATH (for ctranslate2's ctypes.CDLL calls, which only
+    respect PATH on Windows).
+
     Returns True if at least one directory was registered.
     No-op on non-Windows platforms.
     """
@@ -56,13 +60,18 @@ def register_nvidia_dlls() -> bool:
         return False
 
     registered = 0
+    path_entries: list[str] = []
     for d in dirs:
         try:
             os.add_dll_directory(str(d))
+            path_entries.append(str(d))
             log.debug("Registered DLL dir: %s", d)
             registered += 1
         except Exception as exc:
             log.warning("Could not register DLL dir %s: %s", d, exc)
+
+    if path_entries:
+        os.environ["PATH"] = os.pathsep.join(path_entries) + os.pathsep + os.environ.get("PATH", "")
 
     if registered:
         log.info("Registered %d NVIDIA DLL director%s from pip packages",
