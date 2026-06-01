@@ -385,7 +385,7 @@ class HearsayApp:
     def _show_cuda_error_dialog(self, source: str) -> None:
         """Show a dialog offering CPU fallback or CUDA Toolkit install link."""
         dialog = ctk.CTkToplevel(self._root)
-        dialog.title("GPU를 사용할 수 없습니다")
+        dialog.title("GPU Unavailable")
         dialog.resizable(False, False)
         dialog.grab_set()
 
@@ -398,16 +398,16 @@ class HearsayApp:
 
         ctk.CTkLabel(
             dialog,
-            text="CUDA 런타임 라이브러리를 찾을 수 없습니다.",
+            text="CUDA runtime library not found.",
             font=ctk.CTkFont(size=14, weight="bold"),
         ).pack(pady=(20, 4))
 
         ctk.CTkLabel(
             dialog,
             text=(
-                "GPU 설정이 선택되어 있지만 CUDA Toolkit 12.x가\n"
-                "설치되어 있지 않아 GPU로 실행할 수 없습니다.\n\n"
-                "계속하려면 CPU로 변경하거나 CUDA Toolkit을 설치하세요."
+                "GPU is selected but CUDA Toolkit 12.x is not installed,\n"
+                "so inference cannot run on GPU.\n\n"
+                "Switch to CPU or install CUDA Toolkit to continue."
             ),
             justify="center",
         ).pack(pady=(0, 16))
@@ -428,11 +428,11 @@ class HearsayApp:
             webbrowser.open("https://developer.nvidia.com/cuda-downloads")
 
         ctk.CTkButton(
-            btn_frame, text="CPU로 변경", width=160, command=switch_to_cpu,
+            btn_frame, text="Switch to CPU", width=160, command=switch_to_cpu,
         ).pack(side="left", padx=8)
 
         ctk.CTkButton(
-            btn_frame, text="CUDA Toolkit 설치", width=160,
+            btn_frame, text="Install CUDA Toolkit", width=160,
             fg_color="transparent", border_width=1,
             command=open_cuda_download,
         ).pack(side="left", padx=8)

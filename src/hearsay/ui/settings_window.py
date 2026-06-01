@@ -181,13 +181,13 @@ class SettingsWindow(ctk.CTkToplevel):
         self._beep_stop_var = ctk.BooleanVar(value=self._config.beep_on_stop)
         self._beep_save_var = ctk.BooleanVar(value=self._config.beep_on_save)
         ctk.CTkCheckBox(
-            scroll, text="녹음 시작 시 비프음", variable=self._beep_start_var
+            scroll, text="Beep on recording start", variable=self._beep_start_var
         ).pack(anchor="w", padx=15, pady=2)
         ctk.CTkCheckBox(
-            scroll, text="녹음 완료 시 비프음", variable=self._beep_stop_var
+            scroll, text="Beep on recording stop", variable=self._beep_stop_var
         ).pack(anchor="w", padx=15, pady=2)
         ctk.CTkCheckBox(
-            scroll, text="MD 파일 저장 완료 시 비프음", variable=self._beep_save_var
+            scroll, text="Beep on transcript save", variable=self._beep_save_var
         ).pack(anchor="w", padx=15, pady=2)
 
         # ── Clipboard ──
@@ -197,7 +197,7 @@ class SettingsWindow(ctk.CTkToplevel):
         self._clipboard_var = ctk.BooleanVar(value=self._config.copy_to_clipboard)
         ctk.CTkCheckBox(
             scroll,
-            text="저장 완료 시 전체 텍스트를 클립보드에 복사",
+            text="Copy transcript to clipboard on save",
             variable=self._clipboard_var,
         ).pack(anchor="w", padx=15, pady=2)
 
@@ -360,7 +360,7 @@ class SettingsWindow(ctk.CTkToplevel):
             self.after(0, self._download_complete)
         except Exception as exc:
             log.error("Model download/conversion failed", exc_info=True)
-            self.after(0, lambda: self._download_failed(str(exc)))
+            self.after(0, lambda msg=str(exc): self._download_failed(msg))
 
     def _download_complete(self) -> None:
         self._dl_bar.stop()
