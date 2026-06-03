@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from typing import Callable
 
 import numpy as np
@@ -56,6 +57,7 @@ class RealtimeEngine:
         self._recorder = None
         self._final_thread: threading.Thread | None = None
         self._stop = threading.Event()
+        self._final_emitted = threading.Event()
 
     def load(self) -> None:
         """Create the RealtimeSTT recorder (spawns the main-model process) and
@@ -133,15 +135,29 @@ class RealtimeEngine:
                     break
                 log.error("RealtimeSTT text() failed", exc_info=True)
                 break
-            if self._stop.is_set():
-                break
             if text and text.strip():
                 self._on_final(text.strip())
+            self._final_emitted.set()
+            if self._stop.is_set():
+                break
 
     def shutdown(self) -> None:
-        """Stop the final loop and tear down the recorder + child process."""
-        self._stop.set()
+        """Finalize any in-progress utterance, then tear down the recorder."""
         rec = self._recorder
+        if rec is not None and getattr(rec, "is_recording", False):
+            # Stopped mid-utterance: gracefully stop the active recording so its
+            # buffered audio gets a final transcription instead of being dropped.
+            started = getattr(rec, "recording_start_time", 0) or 0
+            min_len = getattr(rec, "min_length_of_recording", 0.5)
+            if not started or (time.time() - started) >= min_len:
+                try:
+                    self._final_emitted.clear()
+                    rec.stop()
+                    self._final_emitted.wait(timeout=15)
+                except Exception:
+                    log.warning("Error finalizing in-progress utterance", exc_info=True)
+
+        self._stop.set()
         self._recorder = None
         if rec is not None:
             try:
