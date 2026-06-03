@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import threading
 from tkinter import filedialog
 
 import customtkinter as ctk
@@ -17,7 +16,6 @@ from hearsay.constants import (
     MODEL_TABLE,
 )
 from hearsay.transcription.model_manager import (
-    download_model,
     is_hf_custom_model,
     is_model_downloaded,
 )
@@ -33,6 +31,7 @@ class SettingsWindow(ctk.CTkToplevel):
         master: ctk.CTk,
         config_manager: ConfigManager,
         on_save: "Callable | None" = None,
+        is_recording: "Callable[[], bool] | None" = None,
     ) -> None:
         super().__init__(master)
         self.title(f"{APP_NAME} Settings")
@@ -41,8 +40,8 @@ class SettingsWindow(ctk.CTkToplevel):
 
         self._config_manager = config_manager
         self._config = config_manager.config
-        self._dl_frame: ctk.CTkFrame | None = None
         self._on_save = on_save
+        self._is_recording = is_recording or (lambda: False)
         self._capturing = False
 
         self._build_ui()
@@ -275,7 +274,7 @@ class SettingsWindow(ctk.CTkToplevel):
                 self._model_hint.configure(text="Korean model (converted, ready)", text_color="green")
             else:
                 self._model_hint.configure(
-                    text="Korean model — will download & convert on Save", text_color="#e07800"
+                    text="Korean model — will download when recording starts", text_color="#e07800"
                 )
         else:
             self._model_hint.configure(text="")
@@ -289,13 +288,29 @@ class SettingsWindow(ctk.CTkToplevel):
             self._dir_var.set(path)
 
     def _save(self) -> None:
-        new_model = self._model_var.get()
-        if is_hf_custom_model(new_model) and not is_model_downloaded(new_model):
-            self._start_download(new_model)
-            return
         self._apply_and_close()
 
     def _apply_and_close(self) -> None:
+        if self._is_recording():
+            _LOCKED = [
+                ("Model",            self._model_var.get(),     self._config.model_name),
+                ("Device",           self._device_var.get(),    self._config.device),
+                ("Compute Type",     self._compute_var.get(),   self._config.compute_type),
+                ("Language",         self._lang_var.get().strip(), self._config.language),
+                ("VAD Filter",       self._vad_var.get(),       self._config.vad_filter),
+                ("Audio Source",     self._source_var.get(),    self._config.audio_source),
+                ("Output Directory", self._dir_var.get(),       self._config.output_dir),
+            ]
+            changed = [name for name, new, old in _LOCKED if new != old]
+            if changed:
+                from tkinter import messagebox
+                messagebox.showinfo(
+                    "Recording Active",
+                    "Settings saved.\n\n"
+                    "The following changes will take effect when you start the next recording:\n"
+                    + "".join(f"\n  - {c}" for c in changed),
+                    parent=self,
+                )
         self._config.audio_source = self._source_var.get()
         self._config.model_name = self._model_var.get()
         self._config.compute_type = self._compute_var.get()
@@ -314,68 +329,6 @@ class SettingsWindow(ctk.CTkToplevel):
         self.destroy()
         if self._on_save:
             self._on_save()
-
-    def _start_download(self, model_name: str) -> None:
-        """Expand window, show progress, and download + convert the model."""
-        self.geometry("550x640")
-
-        self._save_btn.configure(state="disabled")
-        self._cancel_btn.configure(state="disabled")
-
-        if self._dl_frame:
-            self._dl_frame.destroy()
-
-        self._dl_frame = ctk.CTkFrame(self)
-        self._dl_frame.pack(fill="x", padx=20, pady=(0, 10))
-
-        ctk.CTkLabel(
-            self._dl_frame,
-            text=f"Downloading model '{model_name}'",
-            font=("Segoe UI", 13, "bold"),
-        ).pack(pady=(10, 2))
-
-        self._dl_status = ctk.CTkLabel(
-            self._dl_frame,
-            text="Starting...",
-            font=("Segoe UI", 11),
-            text_color="gray",
-        )
-        self._dl_status.pack(pady=4)
-
-        self._dl_bar = ctk.CTkProgressBar(self._dl_frame, width=460)
-        self._dl_bar.pack(pady=(4, 10))
-        self._dl_bar.configure(mode="indeterminate")
-        self._dl_bar.start()
-
-        threading.Thread(
-            target=self._download_bg, args=(model_name,), daemon=True
-        ).start()
-
-    def _download_bg(self, model_name: str) -> None:
-        def set_status(text: str) -> None:
-            self.after(0, lambda: self._dl_status.configure(text=text))
-
-        try:
-            download_model(model_name, progress_callback=set_status)
-            self.after(0, self._download_complete)
-        except Exception as exc:
-            log.error("Model download/conversion failed", exc_info=True)
-            self.after(0, lambda msg=str(exc): self._download_failed(msg))
-
-    def _download_complete(self) -> None:
-        self._dl_bar.stop()
-        self._dl_bar.set(1)
-        self._dl_bar.configure(mode="determinate")
-        self._dl_status.configure(text="Done! Saving settings...", text_color="green")
-        self.after(600, self._apply_and_close)
-
-    def _download_failed(self, error: str) -> None:
-        self._dl_bar.stop()
-        self._dl_bar.set(0)
-        short_error = error.splitlines()[0][:80]
-        self._dl_status.configure(text=f"Error: {short_error}", text_color="red")
-        self._save_btn.configure(state="normal")
-        self._cancel_btn.configure(state="normal")
 
     def _cancel(self) -> None:
         self.grab_release()

@@ -143,6 +143,24 @@ class HearsayApp:
                 except queue.Empty:
                     break
 
+            # Download HF model on-demand (deferred from settings save)
+            from hearsay.transcription.model_manager import (
+                download_model, is_hf_custom_model, is_model_downloaded,
+            )
+            if (is_hf_custom_model(self._engine.model_name)
+                    and not is_model_downloaded(self._engine.model_name)):
+                safe_after(self._root, 0, lambda: self._ensure_live_view().set_status("Downloading model..."))
+                try:
+                    def _dl_progress(msg: str) -> None:
+                        safe_after(self._root, 0,
+                                   lambda m=msg: self._ensure_live_view().set_status(f"Downloading: {m}"))
+                    download_model(self._engine.model_name, progress_callback=_dl_progress)
+                except Exception as exc:
+                    log.error("Model download failed at recording start", exc_info=True)
+                    safe_after(self._root, 0, lambda e=str(exc): self._on_model_download_failed(e))
+                    return
+                safe_after(self._root, 0, lambda: self._ensure_live_view().set_status("Loading model..."))
+
             try:
                 self._engine.load()
             except CudaUnavailableError:
@@ -357,6 +375,7 @@ class HearsayApp:
                 self._root,
                 self._config_manager,
                 on_save=self._on_settings_saved,
+                is_recording=lambda: self._recording,
             ),
         )
 
@@ -370,6 +389,22 @@ class HearsayApp:
             self._root,
             0,
             lambda: AboutWindow(self._root),
+        )
+
+    def _on_model_download_failed(self, error: str) -> None:
+        """Called on main thread when model download fails at recording start."""
+        self._recording = False
+        self._engine = None
+        if self._tray:
+            self._tray.set_recording(False)
+        if self._live_view:
+            self._live_view.set_status("Download failed")
+        from tkinter import messagebox
+        messagebox.showerror(
+            "Model Download Failed",
+            "Failed to download the selected model. Check your internet connection "
+            "or select a different model in Settings.\n\n" + error[:200],
+            parent=self._root,
         )
 
     def _handle_cuda_error(self, source: str) -> None:
