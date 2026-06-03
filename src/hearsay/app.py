@@ -15,10 +15,9 @@ import customtkinter as ctk
 
 from hearsay.audio.recorder import AudioRecorder
 from hearsay.config import ConfigManager
-from hearsay.constants import APP_NAME, DEFAULT_CPU_COMPUTE, LIVE_VIEW_POLL_MS
+from hearsay.constants import APP_NAME, DEFAULT_CPU_COMPUTE
 from hearsay.output.markdown_writer import MarkdownWriter
-from hearsay.transcription.engine import CudaUnavailableError, TranscriptionEngine
-from hearsay.transcription.pipeline import TranscriptionPipeline
+from hearsay.transcription.realtime_engine import CudaUnavailableError, RealtimeEngine
 from hearsay.ui.about_window import AboutWindow
 from hearsay.ui.live_view import LiveTranscriptWindow
 from hearsay.ui.settings_window import SettingsWindow
@@ -37,20 +36,16 @@ class HearsayApp:
         self._config_manager = ConfigManager()
         self._config = self._config_manager.config
 
-        # Queues
-        self._audio_queue: queue.Queue = queue.Queue(maxsize=10)
-        self._transcript_queue: queue.Queue = queue.Queue()
-
         # Threads / components
         self._recorder: AudioRecorder | None = None
-        self._engine: TranscriptionEngine | None = None
-        self._pipeline: TranscriptionPipeline | None = None
+        self._engine: RealtimeEngine | None = None
         self._writer: MarkdownWriter | None = None
         self._tray: SystemTrayIcon | None = None
 
         # State
         self._recording = False
         self._recording_start_time: float | None = None
+        self._utterance_start_elapsed: float | None = None
         self._teardown_thread: threading.Thread | None = None
         self._hotkey_combo: str | None = None
 
@@ -112,17 +107,24 @@ class HearsayApp:
         log.info("Starting recording (source=%s)", source)
         self._recording = True
         self._recording_start_time = time.time()
+        self._utterance_start_elapsed = None
 
         # Set up markdown writer
-        self._writer = MarkdownWriter(self._config.output_dir)
+        self._writer = MarkdownWriter(
+            self._config.output_dir, language=self._config.language
+        )
 
-        # Load transcription engine
-        self._engine = TranscriptionEngine(
+        # Dual-layer realtime engine (tentative + final)
+        self._engine = RealtimeEngine(
             model_name=self._config.model_name,
+            realtime_model_name=self._config.realtime_model_name,
             device=self._config.device,
             compute_type=self._config.compute_type,
             language=self._config.language,
-            vad_filter=self._config.vad_filter,
+            on_tentative=self._on_tentative,
+            on_final=self._on_final,
+            on_utterance_start=self._on_utterance_start,
+            post_speech_silence_duration=self._config.post_speech_silence_duration,
         )
 
         def load_and_start() -> None:
@@ -130,18 +132,6 @@ class HearsayApp:
             if self._teardown_thread is not None:
                 self._teardown_thread.join(timeout=30)
                 self._teardown_thread = None
-
-            # Now safe to clear queues (old teardown has finished draining them)
-            while not self._audio_queue.empty():
-                try:
-                    self._audio_queue.get_nowait()
-                except queue.Empty:
-                    break
-            while not self._transcript_queue.empty():
-                try:
-                    self._transcript_queue.get_nowait()
-                except queue.Empty:
-                    break
 
             # Download HF model on-demand (deferred from settings save)
             from hearsay.transcription.model_manager import (
@@ -159,26 +149,19 @@ class HearsayApp:
                     log.error("Model download failed at recording start", exc_info=True)
                     safe_after(self._root, 0, lambda e=str(exc): self._on_model_download_failed(e))
                     return
-                safe_after(self._root, 0, lambda: self._ensure_live_view().set_status("Loading model..."))
 
+            safe_after(self._root, 0, lambda: self._ensure_live_view().set_status("Loading model..."))
             try:
                 self._engine.load()
             except CudaUnavailableError:
                 safe_after(self._root, 0, lambda: self._handle_cuda_error(source))
                 return
 
-            # Start pipeline
-            self._pipeline = TranscriptionPipeline(
-                audio_queue=self._audio_queue,
-                transcript_queue=self._transcript_queue,
-                engine=self._engine,
-            )
-            self._pipeline.start()
-
-            # Start recorder
+            # Start recorder in streaming mode — frames feed straight into the engine
             self._recorder = AudioRecorder(
-                audio_queue=self._audio_queue,
+                queue.Queue(),
                 source=source,
+                on_frame=self._engine.feed,
             )
             self._recorder.start()
 
@@ -201,7 +184,36 @@ class HearsayApp:
             self._live_view.set_status("Recording...")
         if self._config.beep_on_start:
             threading.Thread(target=self._play_beep, args=("start",), daemon=True).start()
-        self._poll_transcripts()
+
+    # ── Transcription callbacks (from the engine threads) ───────────────────────
+
+    def _on_utterance_start(self) -> None:
+        """RealtimeSTT detected speech onset — stamp the utterance's start time."""
+        if self._recording_start_time is not None:
+            self._utterance_start_elapsed = time.time() - self._recording_start_time
+
+    def _on_tentative(self, text: str) -> None:
+        """Revised in-progress text from the fast realtime model (gray layer)."""
+        safe_after(self._root, 0, lambda t=text: (
+            self._live_view.update_tentative(t) if self._live_view else None
+        ))
+
+    def _on_final(self, text: str) -> None:
+        """Finalized, accurate text for a completed utterance (committed layer)."""
+        elapsed = self._utterance_start_elapsed
+        if elapsed is None and self._recording_start_time is not None:
+            elapsed = time.time() - self._recording_start_time
+        elapsed = elapsed or 0.0
+        self._utterance_start_elapsed = None
+
+        if self._writer:
+            self._writer.append_utterance(elapsed, text)
+
+        from hearsay.output.formatter import format_timestamp
+        line = f"[{format_timestamp(elapsed)}] {text}"
+        safe_after(self._root, 0, lambda l=line: (
+            self._live_view.commit_final(l) if self._live_view else None
+        ))
 
     def _stop_recording(self) -> None:
         """Stop the current recording session.
@@ -230,20 +242,18 @@ class HearsayApp:
 
         # Capture references for the background thread
         recorder = self._recorder
-        pipeline = self._pipeline
         engine = self._engine
         writer = self._writer
         start_time = self._recording_start_time
 
         self._recorder = None
-        self._pipeline = None
         self._engine = None
         self._writer = None
         self._recording_start_time = None
 
         self._teardown_thread = threading.Thread(
             target=self._teardown_recording,
-            args=(recorder, pipeline, engine, writer, start_time),
+            args=(recorder, engine, writer, start_time),
             daemon=True,
             name="RecordingTeardown",
         )
@@ -252,48 +262,19 @@ class HearsayApp:
     def _teardown_recording(
         self,
         recorder: AudioRecorder | None,
-        pipeline: TranscriptionPipeline | None,
-        engine: TranscriptionEngine | None,
+        engine: RealtimeEngine | None,
         writer: MarkdownWriter | None,
         start_time: float | None,
     ) -> None:
         """Blocking recording teardown — runs on a background thread."""
-        # 1. Stop recorder first so it flushes remaining audio to the queue.
+        # 1. Stop recorder first so it stops feeding audio into the engine.
         if recorder:
             recorder.stop()
             recorder.join(timeout=5)
 
-        # 2. Stop pipeline -- it will drain any remaining audio chunks before
-        #    exiting.  Use a generous timeout so CPU transcription can finish.
-        if pipeline:
-            pipeline.stop()
-            pipeline.join(timeout=60)
-            if pipeline.is_alive():
-                log.warning("Pipeline thread still running after join timeout")
-
-        # 3. Unload model only after pipeline is done.
+        # 2. Shut down the engine (stops both models and the child process).
         if engine:
-            engine.unload()
-
-        # Drain any remaining transcript results that arrived after polling stopped
-        if writer:
-            try:
-                while True:
-                    result = self._transcript_queue.get_nowait()
-                    writer.append(result)
-                    if self._live_view:
-                        for seg in result.segments:
-                            from hearsay.output.formatter import format_timestamp
-                            ts = format_timestamp(
-                                result.start_time + seg["start"]
-                            )
-                            safe_after(self._root, 0,
-                                       lambda t=f"[{ts}] {seg['text']}": (
-                                           self._live_view.append_text(t)
-                                           if self._live_view else None
-                                       ))
-            except queue.Empty:
-                pass
+            engine.shutdown()
 
         # Finalize transcript
         duration = None
@@ -329,32 +310,6 @@ class HearsayApp:
         safe_after(self._root, 0, lambda: (
             self._live_view.set_status("Idle") if self._live_view else None
         ))
-
-    def _poll_transcripts(self) -> None:
-        """Poll the transcript queue and update live view + markdown writer."""
-        if not self._recording:
-            return
-
-        try:
-            while True:
-                result = self._transcript_queue.get_nowait()
-                # Write to markdown
-                if self._writer:
-                    self._writer.append(result)
-                # Update live view
-                if self._live_view:
-                    for seg in result.segments:
-                        from hearsay.output.formatter import format_timestamp
-                        ts = format_timestamp(
-                            result.start_time + seg["start"]
-                        )
-                        self._live_view.append_text(f"[{ts}] {seg['text']}")
-        except queue.Empty:
-            pass
-
-        # Schedule next poll
-        if self._recording:
-            safe_after(self._root, LIVE_VIEW_POLL_MS, self._poll_transcripts)
 
     def _ensure_live_view(self) -> LiveTranscriptWindow:
         """Create live view if needed, return it."""
@@ -554,11 +509,10 @@ class HearsayApp:
         if self._recording:
             self._recording = False
             self._teardown_recording(
-                self._recorder, self._pipeline, self._engine,
+                self._recorder, self._engine,
                 self._writer, self._recording_start_time,
             )
             self._recorder = None
-            self._pipeline = None
             self._engine = None
             self._writer = None
             self._recording_start_time = None

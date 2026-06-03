@@ -1,9 +1,14 @@
 """Entry point for Hearsay: python -m hearsay"""
 
+import multiprocessing
 import sys
 
 
 def main() -> None:
+    # RealtimeSTT spawns a child process (spawn start method) for the main
+    # transcription model; freeze_support is required for frozen/PyInstaller builds.
+    multiprocessing.freeze_support()
+
     from hearsay.utils.logging_setup import setup_logging
 
     setup_logging()

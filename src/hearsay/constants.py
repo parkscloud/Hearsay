@@ -58,6 +58,13 @@ DEFAULT_CPU_MODEL = "small.en"
 DEFAULT_GPU_COMPUTE = "float16"
 DEFAULT_CPU_COMPUTE = "int8"
 
+# RealtimeSTT dual-layer transcription.
+# The fast model drives the tentative ("typing") layer; the main model
+# (model_name above) produces the accurate final text once VAD detects the
+# end of an utterance.
+DEFAULT_REALTIME_MODEL = "tiny"   # small/fast model for the tentative layer
+POST_SPEECH_SILENCE_S = 0.7       # trailing silence (s) that finalizes an utterance
+
 # Audio source options
 AUDIO_SOURCE_SYSTEM = "system"
 AUDIO_SOURCE_MIC = "microphone"
@@ -70,6 +77,3 @@ ICON_COLOR_PROCESSING = (50, 150, 220)  # Blue
 
 # Transcript formatting
 PARAGRAPH_GAP_S = 2.0  # Silence gap (seconds) that triggers a paragraph break
-
-# UI
-LIVE_VIEW_POLL_MS = 250  # Poll transcript queue every 250ms

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import queue
+from typing import Callable
 
 import numpy as np
 
@@ -126,9 +127,14 @@ class AudioRecorder(StoppableThread):
     where ``start_time_s`` is the chunk's absolute offset from the start of the
     recording.
 
+    When ``on_frame`` is provided, the recorder streams every mono 16 kHz
+    float32 frame to that callback instead of accumulating chunks into
+    ``audio_queue`` — used to feed RealtimeSTT continuously for low latency.
+
     Args:
-        audio_queue: Queue to push chunks to.
+        audio_queue: Queue to push chunks to (ignored when ``on_frame`` is set).
         source: One of 'system', 'microphone', 'both'.
+        on_frame: Optional per-frame callback for streaming (RealtimeSTT) mode.
         loopback_device_index: PyAudioWPatch device index for loopback.
         mic_device_index: sounddevice device index for mic.
     """
@@ -137,6 +143,7 @@ class AudioRecorder(StoppableThread):
         self,
         audio_queue: queue.Queue,
         source: str = AUDIO_SOURCE_SYSTEM,
+        on_frame: Callable[[np.ndarray], None] | None = None,
         loopback_device_index: int | None = None,
         mic_device_index: int | None = None,
         loopback_channels: int = 2,
@@ -147,6 +154,7 @@ class AudioRecorder(StoppableThread):
         super().__init__(name="AudioRecorder")
         self.audio_queue = audio_queue
         self.source = source
+        self.on_frame = on_frame
         self.loopback_device_index = loopback_device_index
         self.mic_device_index = mic_device_index
         self.loopback_channels = loopback_channels
@@ -212,6 +220,9 @@ class AudioRecorder(StoppableThread):
 
         def callback(indata: np.ndarray, frames: int, time_info: object, status: object) -> None:
             mono = resample(indata.copy(), self.mic_rate, self.mic_channels)
+            if self.on_frame is not None:
+                self.on_frame(mono)
+                return
             acc.add(mono)
             if acc.ready():
                 self.audio_queue.put(acc.pop())
@@ -225,6 +236,9 @@ class AudioRecorder(StoppableThread):
         ):
             while not self.stopped():
                 self.wait(timeout=0.5)
+
+        if self.on_frame is not None:
+            return
 
         final = acc.flush()
         if final is not None:
@@ -331,6 +345,11 @@ class AudioRecorder(StoppableThread):
                 audio = np.frombuffer(raw, dtype=np.int16)
                 lb_mono = resample(audio, self.loopback_rate, self.loopback_channels)
 
+                if self.on_frame is not None:
+                    self.on_frame(mix_with_mic(lb_mono))
+                    mic_buffer.clear()
+                    continue
+
                 # Combined silence: silent only when both sources are quiet.
                 # The latest mic frame approximates current mic activity.
                 mic_silent = _rms(mic_buffer[-1]) < SILENCE_RMS_THRESHOLD if mic_buffer else True
@@ -343,10 +362,11 @@ class AudioRecorder(StoppableThread):
                     mic_buffer.clear()
 
             # --- Flush remaining audio ---
-            final = acc.flush()
-            if final is not None:
-                idx, start_time, lb_chunk = final
-                self.audio_queue.put((idx, start_time, mix_with_mic(lb_chunk)))
+            if self.on_frame is None:
+                final = acc.flush()
+                if final is not None:
+                    idx, start_time, lb_chunk = final
+                    self.audio_queue.put((idx, start_time, mix_with_mic(lb_chunk)))
 
             mic_stream.stop_stream()
             mic_stream.close()
@@ -371,6 +391,11 @@ class AudioRecorder(StoppableThread):
                 break
             audio = np.frombuffer(raw, dtype=np.int16)
             mono = resample(audio, sr, channels)
+
+            if self.on_frame is not None:
+                self.on_frame(mono)
+                continue
+
             acc.add(mono)
 
             if acc.ready():
@@ -380,6 +405,9 @@ class AudioRecorder(StoppableThread):
                     "Audio chunk %d queued (%d samples, t=%.1fs)",
                     idx, len(chunk), start_time,
                 )
+
+        if self.on_frame is not None:
+            return
 
         final = acc.flush()
         if final is not None:

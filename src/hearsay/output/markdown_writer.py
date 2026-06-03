@@ -8,7 +8,6 @@ from datetime import datetime
 from pathlib import Path
 
 from hearsay.output.formatter import clean_transcript_text, format_timestamp, make_title
-from hearsay.transcription.engine import TranscriptionResult
 
 log = logging.getLogger(__name__)
 
@@ -17,9 +16,14 @@ _TS_LINE_RE = re.compile(r"^(\[\d+:\d+(?::\d+)?\] )(.+?)\ *$")
 
 
 class MarkdownWriter:
-    """Writes transcript results to a .md file, appending as chunks arrive."""
+    """Writes transcript results to a .md file, appending as utterances are finalized."""
 
-    def __init__(self, output_dir: str | Path, title: str | None = None) -> None:
+    def __init__(
+        self,
+        output_dir: str | Path,
+        title: str | None = None,
+        language: str = "en",
+    ) -> None:
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -27,7 +31,7 @@ class MarkdownWriter:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         self.file_path = self.output_dir / f"transcript_{timestamp}.md"
         self._header_written = False
-        self._language: str = "en"
+        self._language: str = language or "en"
 
     def _write_header(self) -> None:
         with open(self.file_path, "w", encoding="utf-8") as f:
@@ -35,38 +39,15 @@ class MarkdownWriter:
         self._header_written = True
         log.info("Transcript file created: %s", self.file_path)
 
-    def append(self, result: TranscriptionResult) -> None:
-        """Append a transcription result as timestamped lines matching the live view."""
+    def append_utterance(self, elapsed_seconds: float, text: str) -> None:
+        """Append one finalized utterance as a timestamped line matching the live view."""
+        text = text.strip()
+        if not text:
+            return
         if not self._header_written:
             self._write_header()
 
-        self._language = result.language or self._language
-
-        if not result.segments:
-            self._append_fallback(result)
-            return
-
-        chunk_offset = result.start_time
-        lines: list[str] = []
-        for seg in result.segments:
-            seg_text = seg["text"].strip()
-            if not seg_text:
-                continue
-            ts = format_timestamp(chunk_offset + seg["start"])
-            lines.append(f"[{ts}] {seg_text}  \n")
-
-        if lines:
-            with open(self.file_path, "a", encoding="utf-8") as f:
-                f.write("".join(lines))
-
-        log.debug("Appended chunk %d to %s", result.chunk_index, self.file_path)
-
-    def _append_fallback(self, result: TranscriptionResult) -> None:
-        """Fallback for results with empty segments (e.g. after dedup)."""
-        text = result.text.strip()
-        if not text:
-            return
-        ts = format_timestamp(result.start_time)
+        ts = format_timestamp(elapsed_seconds)
         with open(self.file_path, "a", encoding="utf-8") as f:
             f.write(f"[{ts}] {text}  \n")
 

@@ -11,6 +11,8 @@ from hearsay.constants import (
     AUDIO_SOURCE_SYSTEM,
     DEFAULT_CPU_COMPUTE,
     DEFAULT_CPU_MODEL,
+    DEFAULT_REALTIME_MODEL,
+    POST_SPEECH_SILENCE_S,
 )
 from hearsay.utils.paths import get_config_path, get_default_output_dir
 
@@ -35,6 +37,10 @@ class AppConfig:
     device: str = "cpu"
     language: str = "en"
     vad_filter: bool = True
+
+    # Realtime dual-layer transcription (RealtimeSTT)
+    realtime_model_name: str = DEFAULT_REALTIME_MODEL
+    post_speech_silence_duration: float = POST_SPEECH_SILENCE_S
 
     # Output
     output_dir: str = field(default_factory=lambda: str(get_default_output_dir()))

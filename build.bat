@@ -14,9 +14,24 @@ pyinstaller --noconfirm --onedir --windowed ^
     --hidden-import "sounddevice" ^
     --hidden-import "customtkinter" ^
     --hidden-import "pystray" ^
+    --hidden-import "RealtimeSTT" ^
+    --hidden-import "silero_vad" ^
+    --hidden-import "webrtcvad" ^
+    --hidden-import "onnxruntime" ^
+    --hidden-import "scipy" ^
+    --hidden-import "soundfile" ^
+    --hidden-import "torch" ^
+    --hidden-import "torchaudio" ^
     --collect-all "customtkinter" ^
     --collect-all "faster_whisper" ^
     --collect-all "ctranslate2" ^
+    --collect-all "RealtimeSTT" ^
+    --collect-all "silero_vad" ^
+    --collect-all "onnxruntime" ^
+    --collect-all "scipy" ^
+    --collect-all "soundfile" ^
+    --collect-all "torch" ^
+    --collect-all "torchaudio" ^
     src\hearsay\__main__.py
 
 echo.
