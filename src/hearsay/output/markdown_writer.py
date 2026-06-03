@@ -13,7 +13,7 @@ from hearsay.transcription.engine import TranscriptionResult
 log = logging.getLogger(__name__)
 
 _FOOTER_MARKER = "\n---\n"
-_TS_LINE_RE = re.compile(r"^(\[\d+:\d+(?::\d+)?\] )(.+)$")
+_TS_LINE_RE = re.compile(r"^(\[\d+:\d+(?::\d+)?\] )(.+?)\ *$")
 
 
 class MarkdownWriter:
@@ -53,7 +53,7 @@ class MarkdownWriter:
             if not seg_text:
                 continue
             ts = format_timestamp(chunk_offset + seg["start"])
-            lines.append(f"[{ts}] {seg_text}\n")
+            lines.append(f"[{ts}] {seg_text}  \n")
 
         if lines:
             with open(self.file_path, "a", encoding="utf-8") as f:
@@ -68,7 +68,7 @@ class MarkdownWriter:
             return
         ts = format_timestamp(result.start_time)
         with open(self.file_path, "a", encoding="utf-8") as f:
-            f.write(f"[{ts}] {text}\n")
+            f.write(f"[{ts}] {text}  \n")
 
     def finalize(self, total_duration: float | None = None) -> Path:
         """Write a footer and return the file path."""
@@ -107,7 +107,7 @@ class MarkdownWriter:
             if m:
                 ts_prefix, text = m.group(1), m.group(2)
                 text = clean_transcript_text(text, language=self._language)
-                cleaned_lines.append(f"{ts_prefix}{text}\n")
+                cleaned_lines.append(f"{ts_prefix}{text}  \n")
             else:
                 cleaned_lines.append(line)
 
