@@ -4,9 +4,9 @@ Steps to create a new GitHub release with the installer attached.
 
 ## Prerequisites
 
-- `build.bat` dependencies (Python 3.11+, PyInstaller)
+- `build.bat` dependencies (64-bit Python 3.11+, PyInstaller)
 - Inno Setup 6+ (`winget install JRSoftware.InnoSetup`)
-- GitHub CLI (`winget install GitHub.cli`)
+- GitHub CLI (`winget install GitHub.cli`), authenticated once with `gh auth login`
 
 ## Bump the version
 

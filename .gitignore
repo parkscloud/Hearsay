@@ -5,6 +5,8 @@ __pycache__/
 dist/
 build/
 *.spec
+# ...except the canonical build definition used by build.bat
+!Hearsay.spec
 installer_output/
 *.egg-info/
 .env

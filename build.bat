@@ -1,23 +1,12 @@
 @echo off
 REM Build Hearsay with PyInstaller (onedir mode)
 REM Run from the project root: build.bat
+REM The bundle is defined by Hearsay.spec -- edit that file to change
+REM bundled data, hidden imports, the icon, etc.
 
 echo Building Hearsay...
 
-pyinstaller --noconfirm --onedir --windowed ^
-    --name "Hearsay" ^
-    --icon "src\assets\icon.ico" ^
-    --add-data "src\assets;assets" ^
-    --hidden-import "faster_whisper" ^
-    --hidden-import "ctranslate2" ^
-    --hidden-import "pyaudiowpatch" ^
-    --hidden-import "sounddevice" ^
-    --hidden-import "customtkinter" ^
-    --hidden-import "pystray" ^
-    --collect-all "customtkinter" ^
-    --collect-all "faster_whisper" ^
-    --collect-all "ctranslate2" ^
-    src\hearsay\__main__.py
+pyinstaller --noconfirm Hearsay.spec
 
 echo.
 if %ERRORLEVEL% EQU 0 (

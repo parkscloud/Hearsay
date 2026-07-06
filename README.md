@@ -124,7 +124,7 @@ src/hearsay/
 
 ### Prerequisites
 
-1. **Python 3.11+**
+1. **Python 3.11+ (64-bit)** -- the installer packages x64-only builds
 2. **Project dependencies:** `pip install -r requirements.txt`
 3. **PyInstaller:** `pip install pyinstaller`
 4. **Inno Setup 6+:** `winget install JRSoftware.InnoSetup`
@@ -135,11 +135,13 @@ src/hearsay/
 # 1. Bundle the app with PyInstaller (output in dist\Hearsay\)
 build.bat
 
-# 2. Compile the Windows installer
-iscc installer.iss
+# 2. Compile the Windows installer (winget does not add ISCC to PATH)
+"C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss
 ```
 
 The installer is written to `installer_output\HearsaySetup.exe`.
+
+The PyInstaller bundle is defined by `Hearsay.spec`; `build.bat` is a thin wrapper around it. Edit the spec to change bundled data, hidden imports, or the icon.
 
 ### Releasing
 
