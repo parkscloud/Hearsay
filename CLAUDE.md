@@ -17,7 +17,7 @@ Run from source: `python -m hearsay` with `src` on `PYTHONPATH`.
 
 ## Conventions
 
-- Issue/incident write-ups (`ISSUE_*.md`) are local working notes — never commit them (gitignored). Durable resolutions belong in release notes and commit messages.
+- Bug and feature tracking uses GitHub Issues (`gh issue ...`); release notes reference them ("closes #N"). Scratch incident write-ups (`ISSUE_*.md` at the repo root) are local working notes — gitignored, leave them untracked. Durable resolutions belong in GitHub issues, release notes, and commit messages.
 - Stage files explicitly when committing; avoid `git add -A`.
 - No test suite exists. Verify changes with throwaway harnesses: a stub-engine script for pipeline/writer logic (fake `engine.transcribe` returning canned segments), and a real-device script that instantiates `AudioRecorder` + pipeline directly while driving Windows TTS (`System.Speech`) through the speakers so the loopback stream has real speech.
 
