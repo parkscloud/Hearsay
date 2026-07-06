@@ -7,6 +7,8 @@ build/
 *.spec
 # ...except the canonical build definition used by build.bat
 !Hearsay.spec
+# Local incident write-ups are working notes, never published
+ISSUE_*.md
 installer_output/
 *.egg-info/
 .env
