@@ -8,6 +8,14 @@ Steps to create a new GitHub release with the installer attached.
 - Inno Setup 6+ (`winget install JRSoftware.InnoSetup`)
 - GitHub CLI (`winget install GitHub.cli`)
 
+## Bump the version
+
+Update the version number in all three files (keep them in sync):
+
+- `src/hearsay/__init__.py` — `__version__`
+- `src/hearsay/constants.py` — `APP_VERSION`
+- `installer.iss` — `AppVersion`
+
 ## Build the installer
 
 ```bash

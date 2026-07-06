@@ -9,7 +9,8 @@ No API calls, no cloud services -- everything runs on your machine.
 ## Features
 
 - **System audio capture** -- record what your speakers play (YouTube, Teams, podcasts, etc.) via WASAPI loopback
-- **Microphone capture** -- record from your mic, or mix both sources together
+- **Microphone capture** -- record from your mic, or capture both sources together
+- **Speaker-source labels** -- transcripts mark every switch between **Remote** (system audio) and **Local** (microphone) speech with a timestamped label, so conversations read like a dialogue
 - **Real-time transcription** -- text appears in a live view window as you record
 - **Local AI** -- uses [faster-whisper](https://github.com/SYSTRAN/faster-whisper) (CTranslate2), no internet required after model download
 - **GPU + CPU** -- auto-detects NVIDIA GPU; works on CPU with INT8 quantization
@@ -70,6 +71,8 @@ Uninstall silently:
 2. Choose **Start Recording** > **System Audio**, **Microphone**, or **Both**
 3. Audio is transcribed in real-time -- open **Live Transcript** to watch
 4. **Stop Recording** when done -- a timestamped `.md` file is saved to your output directory
+
+In **Both** mode each source is transcribed separately and labeled (**Remote** for system audio, **Local** for your mic). Headphones give the cleanest separation; on speakers, Hearsay automatically filters the microphone's echo of remote speech.
 
 ## Hardware Requirements
 

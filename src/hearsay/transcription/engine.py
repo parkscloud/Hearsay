@@ -17,10 +17,11 @@ class TranscriptionResult:
     """Result from transcribing one audio chunk."""
 
     text: str
-    segments: list[dict]  # [{start, end, text}, ...]
+    segments: list[dict]  # [{start, end, text, source?}, ...]
     language: str
     language_probability: float
     chunk_index: int
+    window_start: float = 0.0  # wall-clock seconds since recording started
 
 
 class TranscriptionEngine:

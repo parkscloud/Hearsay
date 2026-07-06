@@ -97,6 +97,14 @@ class SystemTrayIcon:
         if self._icon:
             self._icon.icon = icon_processing()
 
+    def notify(self, message: str, title: str | None = None) -> None:
+        """Show a Windows toast/balloon notification."""
+        if self._icon:
+            try:
+                self._icon.notify(message, title or APP_NAME)
+            except Exception:
+                log.warning("Tray notification failed", exc_info=True)
+
     def run(self) -> None:
         """Start the tray icon (blocking -- run in a daemon thread)."""
         self._icon = pystray.Icon(
